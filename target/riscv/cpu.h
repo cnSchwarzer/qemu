@@ -474,6 +474,7 @@ struct RISCVCPUConfig {
 
     /* Vendor-specific custom extensions */
     bool ext_XVentanaCondOps;
+    bool ext_XReito;
 
     uint8_t pmu_num;
     char *priv_spec;

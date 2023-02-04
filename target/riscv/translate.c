@@ -137,6 +137,7 @@ static bool always_true_p(DisasContext *ctx  __attribute__((__unused__)))
     }
 
 MATERIALISE_EXT_PREDICATE(XVentanaCondOps);
+MATERIALISE_EXT_PREDICATE(XReito);
 
 #ifdef TARGET_RISCV32
 #define get_xl(ctx)    MXL_RV32
@@ -1085,7 +1086,11 @@ static uint32_t opcode_at(DisasContextBase *dcbase, target_ulong pc)
 /* Include the auto-generated decoder for 16 bit insn */
 #include "decode-insn16.c.inc"
 /* Include decoders for factored-out extensions */
-#include "decode-XVentanaCondOps.c.inc"
+#include "decode-XVentanaCondOps.c.inc" 
+
+/* Reito */
+#include "decode-XReito.c.inc"
+#include "insn_trans/trans_xreito.c.inc"
 
 /* The specification allows for longer insns, but not supported by qemu. */
 #define MAX_INSN_LEN  4
@@ -1106,6 +1111,7 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
         bool (*decode_func)(DisasContext *, uint32_t);
     } decoders[] = {
         { always_true_p,  decode_insn32 },
+        { has_XReito_p,  decode_XReito },
         { has_XVentanaCondOps_p,  decode_XVentanaCodeOps },
     };
 

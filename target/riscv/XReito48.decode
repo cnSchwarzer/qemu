@@ -1,0 +1,23 @@
+#
+# RISC-V translation routines for the XReito extension
+#
+# Copyright (c) 2022 Reito
+#
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# 
+ 
+# Fields
+%imm  32:16
+%rs2  27:5
+%rs1  22:5 
+%rd   17:5 
+%cop  6:11
+
+# Argument sets 
+&reito48 imm rd rs1 rs2 cop 
+
+# Formats 
+@reito48     ---------------- ................ ..... ..... ..... ........... ...... %imm %rd %rs1 %rs2 %cop 
+
+# *** Use 48-bit RV Instruction ***
+rt48         ---------------- ................ ..... ..... ..... ........... 011111 @reito48

@@ -63,7 +63,7 @@ typedef struct DisasContext {
     RISCVMXL misa_mxl_max;
     RISCVMXL xl;
     uint32_t misa_ext;
-    uint32_t opcode;
+    uint64_t opcode;
     uint32_t mstatus_fs;
     uint32_t mstatus_vs;
     uint32_t mstatus_hs_fs;
@@ -1058,13 +1058,13 @@ static bool gen_unary_per_ol(DisasContext *ctx, arg_r2 *a, DisasExtend ext,
     return gen_unary(ctx, a, ext, f_tl);
 }
 
-static uint32_t opcode_at(DisasContextBase *dcbase, target_ulong pc)
+static uint64_t opcode_at(DisasContextBase *dcbase, target_ulong pc)
 {
     DisasContext *ctx = container_of(dcbase, DisasContext, base);
     CPUState *cpu = ctx->cs;
     CPURISCVState *env = cpu->env_ptr;
 
-    return cpu_ldl_code(env, pc);
+    return cpu_ldq_code(env, pc);
 }
 
 /* Include insn module translation function */
@@ -1089,15 +1089,24 @@ static uint32_t opcode_at(DisasContextBase *dcbase, target_ulong pc)
 #include "decode-XVentanaCondOps.c.inc" 
 
 /* Reito */
-#include "decode-XReito.c.inc"
-#include "insn_trans/trans_xreito.c.inc"
+#include "decode-XReito32.c.inc"
+#include "insn_trans/trans_xreito32.c.inc"
+#include "decode-XReito48.c.inc"
+#include "insn_trans/trans_xreito48.c.inc"
 
 /* The specification allows for longer insns, but not supported by qemu. */
-#define MAX_INSN_LEN  4
+// Modified to 6 & 8 to support reito
+#define MAX_INSN_LEN  8
 
 static inline int insn_len(uint16_t first_word)
 {
-    return (first_word & 3) == 3 ? 4 : 2;
+    if ((first_word & 0b11) == 0b11)
+        return 4;
+    if ((first_word & 0b111111) == 0b011111)
+        return 6;
+    if ((first_word & 0b1111111) == 0b0111111)
+        return 8;
+    return 2;
 }
 
 static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
@@ -1111,19 +1120,27 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
         bool (*decode_func)(DisasContext *, uint32_t);
     } decoders[] = {
         { always_true_p,  decode_insn32 },
-        { has_XReito_p,  decode_XReito },
+        { has_XReito_p,  decode_XReito32 }, 
         { has_XVentanaCondOps_p,  decode_XVentanaCodeOps },
+    };
+
+    static const struct {
+        bool (*guard_func)(DisasContext *);
+        bool (*decode_func)(DisasContext *, uint64_t);
+    } decoders64[] = { 
+        { has_XReito_p,  decode_XReito48 },  
     };
 
     ctx->virt_inst_excp = false;
     /* Check for compressed insn */
-    if (insn_len(opcode) == 2) {
+    int len = insn_len(opcode);
+    if (len == 2) {
         ctx->opcode = opcode;
         ctx->pc_succ_insn = ctx->base.pc_next + 2;
         if (has_ext(ctx, RVC) && decode_insn16(ctx, opcode)) {
             return;
         }
-    } else {
+    } else if (len == 4) {
         uint32_t opcode32 = opcode;
         opcode32 = deposit32(opcode32, 16, 16,
                              translator_lduw(env, &ctx->base,
@@ -1137,10 +1154,38 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
                 return;
             }
         }
+    } else if (len == 6) {
+        uint32_t opcode48 = opcode;
+        opcode48 = deposit64(opcode48, 16, 32,
+                             translator_ldl(env, &ctx->base,
+                                             ctx->base.pc_next + 2));
+        ctx->opcode = opcode48;
+        ctx->pc_succ_insn = ctx->base.pc_next + 6;
+
+        for (size_t i = 0; i < ARRAY_SIZE(decoders64); ++i) {
+            if (decoders64[i].guard_func(ctx) &&
+                decoders64[i].decode_func(ctx, opcode48)) {
+                return;
+            }
+        }
+    } else if (len == 8) {
+        uint32_t opcode64 = opcode;
+        opcode64 = deposit64(opcode64, 16, 48,
+                             translator_ldq(env, &ctx->base,
+                                             ctx->base.pc_next + 2));
+        ctx->opcode = opcode64;
+        ctx->pc_succ_insn = ctx->base.pc_next + 8;
+
+        for (size_t i = 0; i < ARRAY_SIZE(decoders64); ++i) {
+            if (decoders64[i].guard_func(ctx) &&
+                decoders64[i].decode_func(ctx, opcode64)) {
+                return;
+            }
+        }
     }
 
     gen_exception_illegal(ctx);
-}
+} 
 
 static void riscv_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
 {

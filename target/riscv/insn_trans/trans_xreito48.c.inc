@@ -16,22 +16,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */ 
 
-static bool trans_rt_c0(DisasContext *ctx, arg_rt_c0 *a)
-{
-    return true;
-}
-
-static bool trans_rt_c1(DisasContext *ctx, arg_rt_c1 *a)
+static bool trans_rt48(DisasContext *ctx, arg_rt48 *a)
 {
     return true;
 }
  
-static bool trans_rt_c2(DisasContext *ctx, arg_rt_c2 *a)
-{
-    return true;
-}
- 
-static bool trans_rt_c3(DisasContext *ctx, arg_rt_c3 *a)
-{
-    return true;
-}

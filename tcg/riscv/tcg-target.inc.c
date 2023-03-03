@@ -970,6 +970,9 @@ static void tcg_out_tlb_load(TCGContext *s, TCGReg addrl,
                              TCGReg addrh, TCGMemOpIdx oi,
                              tcg_insn_unit **label_ptr, bool is_load)
 {
+#ifdef TARGET_ARM
+    struct uc_struct *uc = s->uc;
+#endif
     MemOp opc = get_memop(oi);
     unsigned s_bits = opc & MO_SIZE;
     unsigned a_bits = get_alignment_bits(opc);
@@ -1842,24 +1845,24 @@ static void tcg_target_qemu_prologue(TCGContext *s)
 
 static void tcg_target_init(TCGContext *s)
 {
-    tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffff;
+    s->tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffff;
     if (TCG_TARGET_REG_BITS == 64) {
-        tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffff;
+        s->tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffff;
     }
 
-    tcg_target_call_clobber_regs = -1u;
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S0);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S1);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S2);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S3);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S4);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S5);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S6);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S7);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S8);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S9);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S10);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_S11);
+    s->tcg_target_call_clobber_regs = -1u;
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S0);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S1);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S2);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S3);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S4);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S5);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S6);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S7);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S8);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S9);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S10);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_S11);
 
     s->reserved_regs = 0;
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_ZERO);
@@ -1911,7 +1914,7 @@ static const DebugFrame debug_frame = {
     }
 };
 
-void tcg_register_jit(void *buf, size_t buf_size)
+void tcg_register_jit(TCGContext *s, void *buf, size_t buf_size)
 {
-    tcg_register_jit_int(buf, buf_size, &debug_frame, sizeof(debug_frame));
+    tcg_register_jit_int(s, buf, buf_size, &debug_frame, sizeof(debug_frame));
 }

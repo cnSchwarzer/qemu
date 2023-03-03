@@ -29,9 +29,9 @@
 
 /* #define DEBUG_HELPER */
 #ifdef DEBUG_HELPER
-#define HELPER_LOG(x...) qemu_log(x)
+#define HELPER_LOG(x, ...) qemu_log(x)
 #else
-#define HELPER_LOG(x...)
+#define HELPER_LOG(x, ...)
 #endif
 
 #define RET128(F) (env->retxl = F.low, F.high)
@@ -824,7 +824,7 @@ static const int fpc_to_rnd[8] = {
 void HELPER(sfpc)(CPUS390XState *env, uint64_t fpc)
 {
     if (fpc_to_rnd[fpc & 0x7] == -1 || fpc & 0x03030088u ||
-        (!s390_has_feat(S390_FEAT_FLOATING_POINT_EXT) && fpc & 0x4)) {
+        (!s390_has_feat(env->uc, S390_FEAT_FLOATING_POINT_EXT) && fpc & 0x4)) {
         tcg_s390_program_interrupt(env, PGM_SPECIFICATION, GETPC());
     }
 
@@ -842,7 +842,7 @@ void HELPER(sfas)(CPUS390XState *env, uint64_t fpc)
     uint32_t s390_exc;
 
     if (fpc_to_rnd[fpc & 0x7] == -1 || fpc & 0x03030088u ||
-        (!s390_has_feat(S390_FEAT_FLOATING_POINT_EXT) && fpc & 0x4)) {
+        (!s390_has_feat(env->uc, S390_FEAT_FLOATING_POINT_EXT) && fpc & 0x4)) {
         tcg_s390_program_interrupt(env, PGM_SPECIFICATION, GETPC());
     }
 

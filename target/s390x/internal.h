@@ -13,7 +13,7 @@
 #include "cpu.h"
 
 #ifndef CONFIG_USER_ONLY
-typedef struct LowCore {
+QEMU_PACK(typedef struct LowCore {
     /* prefix area: defined by architecture */
     uint32_t        ccw1[2];                  /* 0x000 */
     uint32_t        ccw2[4];                  /* 0x008 */
@@ -91,7 +91,7 @@ typedef struct LowCore {
     /* align to the top of the prefix area */
 
     uint8_t         pad18[0x2000 - 0x1400];    /* 0x1400 */
-} QEMU_PACKED LowCore;
+}) LowCore;
 QEMU_BUILD_BUG_ON(sizeof(LowCore) != 8192);
 #endif /* CONFIG_USER_ONLY */
 
@@ -196,8 +196,7 @@ enum cc_op {
     CC_OP_NZ_F128,              /* FP dst != 0 (128bit) */
 
     CC_OP_ICM,                  /* insert characters under mask */
-    CC_OP_SLA_32,               /* Calculate shift left signed (32bit) */
-    CC_OP_SLA_64,               /* Calculate shift left signed (64bit) */
+    CC_OP_SLA,                  /* Calculate shift left signed */
     CC_OP_FLOGR,                /* find leftmost one */
     CC_OP_LCBB,                 /* load count to block boundary */
     CC_OP_VC,                   /* vector compare result */
@@ -225,11 +224,6 @@ static inline hwaddr decode_basedisp_s(CPUS390XState *env, uint32_t ipb,
 /* Base/displacement are at the same locations. */
 #define decode_basedisp_rs decode_basedisp_s
 
-/* arch_dump.c */
-int s390_cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cs,
-                              int cpuid, void *opaque);
-
-
 /* cc_helper.c */
 const char *cc_name(enum cc_op cc_op);
 void load_psw(CPUS390XState *env, uint64_t mask, uint64_t addr);
@@ -238,26 +232,15 @@ uint32_t calc_cc(CPUS390XState *env, uint32_t cc_op, uint64_t src, uint64_t dst,
 
 
 /* cpu.c */
-#ifndef CONFIG_USER_ONLY
 unsigned int s390_cpu_halt(S390CPU *cpu);
 void s390_cpu_unhalt(S390CPU *cpu);
-#else
-static inline unsigned int s390_cpu_halt(S390CPU *cpu)
-{
-    return 0;
-}
-
-static inline void s390_cpu_unhalt(S390CPU *cpu)
-{
-}
-#endif /* CONFIG_USER_ONLY */
 
 
 /* cpu_models.c */
-void s390_cpu_model_register_props(Object *obj);
-void s390_cpu_model_class_register_props(ObjectClass *oc);
-void s390_realize_cpu_model(CPUState *cs, Error **errp);
-ObjectClass *s390_cpu_class_by_name(const char *name);
+void s390_cpu_model_register_props(CPUState *obj);
+void s390_cpu_model_class_register_props(CPUClass *oc);
+void s390_realize_cpu_model(CPUState *cs);
+CPUClass *s390_cpu_class_by_name(const char *name);
 
 
 /* excp_helper.c */
@@ -312,7 +295,7 @@ int s390_store_status(S390CPU *cpu, hwaddr addr, bool store_arch);
 int s390_store_adtl_status(S390CPU *cpu, hwaddr addr, hwaddr len);
 #ifndef CONFIG_USER_ONLY
 LowCore *cpu_map_lowcore(CPUS390XState *env);
-void cpu_unmap_lowcore(LowCore *lowcore);
+void cpu_unmap_lowcore(CPUS390XState *env, LowCore *lowcore);
 #endif /* CONFIG_USER_ONLY */
 
 
@@ -372,7 +355,7 @@ void handle_diag_308(CPUS390XState *env, uint64_t r1, uint64_t r3,
 
 
 /* translate.c */
-void s390x_translate_init(void);
+void s390x_translate_init(struct uc_struct *uc);
 
 
 /* sigp.c */

@@ -18,11 +18,9 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "exec/helper-proto.h"
-#include "trace.h"
 
 static inline void memcpy32(target_ulong *dst, const target_ulong *src)
 {
@@ -87,8 +85,8 @@ void cpu_put_psr_raw(CPUSPARCState *env, target_ulong val)
 void cpu_put_psr(CPUSPARCState *env, target_ulong val)
 {
     cpu_put_psr_raw(env, val);
-#if ((!defined(TARGET_SPARC64)) && !defined(CONFIG_USER_ONLY))
-    cpu_check_irqs(env);
+#if !defined(TARGET_SPARC64)
+    // cpu_check_irqs(env);
 #endif
 }
 
@@ -156,9 +154,7 @@ void helper_wrpsr(CPUSPARCState *env, target_ulong new_psr)
         cpu_raise_exception_ra(env, TT_ILL_INSN, GETPC());
     } else {
         /* cpu_put_psr may trigger interrupts, hence BQL */
-        qemu_mutex_lock_iothread();
         cpu_put_psr(env, new_psr);
-        qemu_mutex_unlock_iothread();
     }
 }
 
@@ -301,7 +297,6 @@ static inline uint64_t *get_gregset(CPUSPARCState *env, uint32_t pstate)
 
     switch (pstate) {
     default:
-        trace_win_helper_gregset_error(pstate);
         /* pass through to normal set of global registers */
     case 0:
         return env->bgregs;
@@ -354,15 +349,11 @@ void cpu_change_pstate(CPUSPARCState *env, uint32_t new_pstate)
     new_pstate_regs = new_pstate & 0xc01;
 
     if (new_pstate_regs != pstate_regs) {
-        trace_win_helper_switch_pstate(pstate_regs, new_pstate_regs);
-
         /* Switch global register bank */
         src = get_gregset(env, new_pstate_regs);
         dst = get_gregset(env, pstate_regs);
         memcpy32(dst, env->gregs);
         memcpy32(env->gregs, src);
-    } else {
-        trace_win_helper_no_switch_pstate(new_pstate_regs);
     }
     env->pstate = new_pstate;
 }
@@ -371,28 +362,18 @@ void helper_wrpstate(CPUSPARCState *env, target_ulong new_state)
 {
     cpu_change_pstate(env, new_state & 0xf3f);
 
-#if !defined(CONFIG_USER_ONLY)
     if (cpu_interrupts_enabled(env)) {
-        qemu_mutex_lock_iothread();
-        cpu_check_irqs(env);
-        qemu_mutex_unlock_iothread();
+        // cpu_check_irqs(env);
     }
-#endif
 }
 
 void helper_wrpil(CPUSPARCState *env, target_ulong new_pil)
 {
-#if !defined(CONFIG_USER_ONLY)
-    trace_win_helper_wrpil(env->psrpil, (uint32_t)new_pil);
-
     env->psrpil = new_pil;
 
     if (cpu_interrupts_enabled(env)) {
-        qemu_mutex_lock_iothread();
-        cpu_check_irqs(env);
-        qemu_mutex_unlock_iothread();
+        // cpu_check_irqs(env);
     }
-#endif
 }
 
 void helper_done(CPUSPARCState *env)
@@ -413,15 +394,9 @@ void helper_done(CPUSPARCState *env)
     }
     env->tl--;
 
-    trace_win_helper_done(env->tl);
-
-#if !defined(CONFIG_USER_ONLY)
     if (cpu_interrupts_enabled(env)) {
-        qemu_mutex_lock_iothread();
-        cpu_check_irqs(env);
-        qemu_mutex_unlock_iothread();
+        // cpu_check_irqs(env);
     }
-#endif
 }
 
 void helper_retry(CPUSPARCState *env)
@@ -442,14 +417,8 @@ void helper_retry(CPUSPARCState *env)
     }
     env->tl--;
 
-    trace_win_helper_retry(env->tl);
-
-#if !defined(CONFIG_USER_ONLY)
     if (cpu_interrupts_enabled(env)) {
-        qemu_mutex_lock_iothread();
-        cpu_check_irqs(env);
-        qemu_mutex_unlock_iothread();
+        // cpu_check_irqs(env);
     }
-#endif
 }
 #endif

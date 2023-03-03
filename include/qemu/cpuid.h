@@ -11,7 +11,11 @@
 # error "<cpuid.h> is unusable with this compiler"
 #endif
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
 #include <cpuid.h>
+#endif
 
 /* Cover the uses that we have within qemu.  */
 /* ??? Irritating that we have the same information in target/i386/.  */
@@ -22,6 +26,9 @@
 #endif
 #ifndef bit_SSE2
 #define bit_SSE2        (1 << 26)
+#endif
+#ifndef bit_POPCNT
+#define bit_POPCNT        (1 << 23)
 #endif
 
 /* Leaf 1, %ecx */

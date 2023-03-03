@@ -24,63 +24,6 @@
 #include "exec/cpu_ldst.h"
 
 /* Secure Virtual Machine helpers */
-
-#if defined(CONFIG_USER_ONLY)
-
-void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
-{
-}
-
-void helper_vmmcall(CPUX86State *env)
-{
-}
-
-void helper_vmload(CPUX86State *env, int aflag)
-{
-}
-
-void helper_vmsave(CPUX86State *env, int aflag)
-{
-}
-
-void helper_stgi(CPUX86State *env)
-{
-}
-
-void helper_clgi(CPUX86State *env)
-{
-}
-
-void helper_skinit(CPUX86State *env)
-{
-}
-
-void helper_invlpga(CPUX86State *env, int aflag)
-{
-}
-
-void cpu_vmexit(CPUX86State *nenv, uint32_t exit_code, uint64_t exit_info_1,
-                uintptr_t retaddr)
-{
-    assert(0);
-}
-
-void helper_svm_check_intercept_param(CPUX86State *env, uint32_t type,
-                                      uint64_t param)
-{
-}
-
-void cpu_svm_check_intercept_param(CPUX86State *env, uint32_t type,
-                                   uint64_t param, uintptr_t retaddr)
-{
-}
-
-void helper_svm_check_io(CPUX86State *env, uint32_t port, uint32_t param,
-                         uint32_t next_eip_addend)
-{
-}
-#else
-
 static inline void svm_save_seg(CPUX86State *env, hwaddr addr,
                                 const SegmentCache *sc)
 {
@@ -136,7 +79,7 @@ void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
         addr = (uint32_t)env->regs[R_EAX];
     }
 
-    qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmrun! " TARGET_FMT_lx "\n", addr);
+    // qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmrun! " TARGET_FMT_lx "\n", addr);
 
     env->vm_vmcb = addr;
 
@@ -324,12 +267,12 @@ void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
                                                  control.event_inj));
     if (event_inj & SVM_EVTINJ_VALID) {
         uint8_t vector = event_inj & SVM_EVTINJ_VEC_MASK;
-        uint16_t valid_err = event_inj & SVM_EVTINJ_VALID_ERR;
+        // uint16_t valid_err = event_inj & SVM_EVTINJ_VALID_ERR;
         uint32_t event_inj_err = x86_ldl_phys(cs, env->vm_vmcb +
                                           offsetof(struct vmcb,
                                                    control.event_inj_err));
 
-        qemu_log_mask(CPU_LOG_TB_IN_ASM, "Injecting(%#hx): ", valid_err);
+        // qemu_log_mask(CPU_LOG_TB_IN_ASM, "Injecting(%#hx): ", valid_err);
         /* FIXME: need to implement valid_err */
         switch (event_inj & SVM_EVTINJ_TYPE_MASK) {
         case SVM_EVTINJ_TYPE_INTR:
@@ -337,7 +280,7 @@ void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
             env->error_code = event_inj_err;
             env->exception_is_int = 0;
             env->exception_next_eip = -1;
-            qemu_log_mask(CPU_LOG_TB_IN_ASM, "INTR");
+            // qemu_log_mask(CPU_LOG_TB_IN_ASM, "INTR");
             /* XXX: is it always correct? */
             do_interrupt_x86_hardirq(env, vector, 1);
             break;
@@ -346,7 +289,7 @@ void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
             env->error_code = event_inj_err;
             env->exception_is_int = 0;
             env->exception_next_eip = env->eip;
-            qemu_log_mask(CPU_LOG_TB_IN_ASM, "NMI");
+            // qemu_log_mask(CPU_LOG_TB_IN_ASM, "NMI");
             cpu_loop_exit(cs);
             break;
         case SVM_EVTINJ_TYPE_EXEPT:
@@ -354,7 +297,7 @@ void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
             env->error_code = event_inj_err;
             env->exception_is_int = 0;
             env->exception_next_eip = -1;
-            qemu_log_mask(CPU_LOG_TB_IN_ASM, "EXEPT");
+            // qemu_log_mask(CPU_LOG_TB_IN_ASM, "EXEPT");
             cpu_loop_exit(cs);
             break;
         case SVM_EVTINJ_TYPE_SOFT:
@@ -362,12 +305,12 @@ void helper_vmrun(CPUX86State *env, int aflag, int next_eip_addend)
             env->error_code = event_inj_err;
             env->exception_is_int = 1;
             env->exception_next_eip = env->eip;
-            qemu_log_mask(CPU_LOG_TB_IN_ASM, "SOFT");
+            // qemu_log_mask(CPU_LOG_TB_IN_ASM, "SOFT");
             cpu_loop_exit(cs);
             break;
         }
-        qemu_log_mask(CPU_LOG_TB_IN_ASM, " %#x %#x\n", cs->exception_index,
-                      env->error_code);
+        // qemu_log_mask(CPU_LOG_TB_IN_ASM, " %#x %#x\n", cs->exception_index,
+        //               env->error_code);
     }
 }
 
@@ -390,11 +333,11 @@ void helper_vmload(CPUX86State *env, int aflag)
         addr = (uint32_t)env->regs[R_EAX];
     }
 
-    qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmload! " TARGET_FMT_lx
-                  "\nFS: %016" PRIx64 " | " TARGET_FMT_lx "\n",
-                  addr, x86_ldq_phys(cs, addr + offsetof(struct vmcb,
-                                                          save.fs.base)),
-                  env->segs[R_FS].base);
+    // qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmload! " TARGET_FMT_lx
+    //               "\nFS: %016" PRIx64 " | " TARGET_FMT_lx "\n",
+    //               addr, x86_ldq_phys(cs, addr + offsetof(struct vmcb,
+    //                                                       save.fs.base)),
+    //               env->segs[R_FS].base);
 
     svm_load_seg_cache(env, addr + offsetof(struct vmcb, save.fs), R_FS);
     svm_load_seg_cache(env, addr + offsetof(struct vmcb, save.gs), R_GS);
@@ -430,11 +373,11 @@ void helper_vmsave(CPUX86State *env, int aflag)
         addr = (uint32_t)env->regs[R_EAX];
     }
 
-    qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmsave! " TARGET_FMT_lx
-                  "\nFS: %016" PRIx64 " | " TARGET_FMT_lx "\n",
-                  addr, x86_ldq_phys(cs,
-                                 addr + offsetof(struct vmcb, save.fs.base)),
-                  env->segs[R_FS].base);
+    // qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmsave! " TARGET_FMT_lx
+    //               "\nFS: %016" PRIx64 " | " TARGET_FMT_lx "\n",
+    //               addr, x86_ldq_phys(cs,
+    //                              addr + offsetof(struct vmcb, save.fs.base)),
+    //               env->segs[R_FS].base);
 
     svm_save_seg(env, addr + offsetof(struct vmcb, save.fs),
                  &env->segs[R_FS]);
@@ -506,71 +449,61 @@ void cpu_svm_check_intercept_param(CPUX86State *env, uint32_t type,
     if (likely(!(env->hflags & HF_GUEST_MASK))) {
         return;
     }
-    switch (type) {
-    case SVM_EXIT_READ_CR0 ... SVM_EXIT_READ_CR0 + 8:
+
+    if ((int32_t)type >= SVM_EXIT_READ_CR0 && type <= SVM_EXIT_READ_CR0 + 8) {
         if (env->intercept_cr_read & (1 << (type - SVM_EXIT_READ_CR0))) {
             cpu_vmexit(env, type, param, retaddr);
         }
-        break;
-    case SVM_EXIT_WRITE_CR0 ... SVM_EXIT_WRITE_CR0 + 8:
+    } else if (type >= SVM_EXIT_WRITE_CR0 && type <= SVM_EXIT_WRITE_CR0 + 8) {
         if (env->intercept_cr_write & (1 << (type - SVM_EXIT_WRITE_CR0))) {
             cpu_vmexit(env, type, param, retaddr);
         }
-        break;
-    case SVM_EXIT_READ_DR0 ... SVM_EXIT_READ_DR0 + 7:
+    } else if (type >= SVM_EXIT_READ_DR0 && type <= SVM_EXIT_READ_DR0 + 7) {
         if (env->intercept_dr_read & (1 << (type - SVM_EXIT_READ_DR0))) {
             cpu_vmexit(env, type, param, retaddr);
         }
-        break;
-    case SVM_EXIT_WRITE_DR0 ... SVM_EXIT_WRITE_DR0 + 7:
+    } else if (type >= SVM_EXIT_WRITE_DR0 && type <= SVM_EXIT_WRITE_DR0 + 7) {
         if (env->intercept_dr_write & (1 << (type - SVM_EXIT_WRITE_DR0))) {
             cpu_vmexit(env, type, param, retaddr);
         }
-        break;
-    case SVM_EXIT_EXCP_BASE ... SVM_EXIT_EXCP_BASE + 31:
+    } else if (type >= SVM_EXIT_EXCP_BASE && type <= SVM_EXIT_EXCP_BASE + 31) {
         if (env->intercept_exceptions & (1 << (type - SVM_EXIT_EXCP_BASE))) {
             cpu_vmexit(env, type, param, retaddr);
         }
-        break;
-    case SVM_EXIT_MSR:
+    } else if (type == SVM_EXIT_MSR) {
         if (env->intercept & (1ULL << (SVM_EXIT_MSR - SVM_EXIT_INTR))) {
             /* FIXME: this should be read in at vmrun (faster this way?) */
             uint64_t addr = x86_ldq_phys(cs, env->vm_vmcb +
-                                     offsetof(struct vmcb,
-                                              control.msrpm_base_pa));
-            uint32_t t0, t1;
+                    offsetof(struct vmcb,
+                        control.msrpm_base_pa));
+            uint32_t t0, t1, ecx;
 
-            switch ((uint32_t)env->regs[R_ECX]) {
-            case 0 ... 0x1fff:
-                t0 = (env->regs[R_ECX] * 2) % 8;
-                t1 = (env->regs[R_ECX] * 2) / 8;
-                break;
-            case 0xc0000000 ... 0xc0001fff:
-                t0 = (8192 + env->regs[R_ECX] - 0xc0000000) * 2;
+            ecx = env->regs[R_ECX];
+#define XRANGE(x, a, b) (x >= a && x <= b)
+            if (XRANGE(ecx, 0, 0x1fff)) {
+                t0 = (ecx * 2) % 8;
+                t1 = (ecx * 2) / 8;
+            } else if (XRANGE(ecx, 0xc0000000, 0xc0001fff)) {
+                t0 = (8192 + ecx - 0xc0000000) * 2;
                 t1 = (t0 / 8);
                 t0 %= 8;
-                break;
-            case 0xc0010000 ... 0xc0011fff:
-                t0 = (16384 + env->regs[R_ECX] - 0xc0010000) * 2;
+            } else if (XRANGE(ecx, 0xc0010000, 0xc0011fff)) {
+                t0 = (16384 + ecx - 0xc0010000) * 2;
                 t1 = (t0 / 8);
                 t0 %= 8;
-                break;
-            default:
+            } else {
                 cpu_vmexit(env, type, param, retaddr);
                 t0 = 0;
                 t1 = 0;
-                break;
             }
+#undef XRANGE
+
             if (x86_ldub_phys(cs, addr + t1) & ((1 << param) << t0)) {
                 cpu_vmexit(env, type, param, retaddr);
             }
         }
-        break;
-    default:
-        if (env->intercept & (1ULL << (type - SVM_EXIT_INTR))) {
-            cpu_vmexit(env, type, param, retaddr);
-        }
-        break;
+    } else if (env->intercept & (1ULL << (type - SVM_EXIT_INTR))) {
+        cpu_vmexit(env, type, param, retaddr);
     }
 }
 
@@ -608,12 +541,12 @@ void cpu_vmexit(CPUX86State *env, uint32_t exit_code, uint64_t exit_info_1,
 
     cpu_restore_state(cs, retaddr, true);
 
-    qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmexit(%08x, %016" PRIx64 ", %016"
-                  PRIx64 ", " TARGET_FMT_lx ")!\n",
-                  exit_code, exit_info_1,
-                  x86_ldq_phys(cs, env->vm_vmcb + offsetof(struct vmcb,
-                                                   control.exit_info_2)),
-                  env->eip);
+    // qemu_log_mask(CPU_LOG_TB_IN_ASM, "vmexit(%08x, %016" PRIx64 ", %016"
+    //               PRIx64 ", " TARGET_FMT_lx ")!\n",
+    //               exit_code, exit_info_1,
+    //               x86_ldq_phys(cs, env->vm_vmcb + offsetof(struct vmcb,
+    //                                                control.exit_info_2)),
+    //               env->eip);
 
     cs->exception_index = EXCP_VMEXIT + exit_code;
     env->error_code = exit_info_1;
@@ -791,5 +724,3 @@ void do_vmexit(CPUX86State *env, uint32_t exit_code, uint64_t exit_info_1)
        host's code segment or non-canonical (in the case of long mode), a
        #GP fault is delivered inside the host. */
 }
-
-#endif

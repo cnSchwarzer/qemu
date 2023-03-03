@@ -11,7 +11,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/main-loop.h"
 #include "internal.h"
 #include "tcg_s390x.h"
 #include "exec/helper-proto.h"
@@ -40,7 +39,7 @@ uint32_t HELPER(msa)(CPUS390XState *env, uint32_t r1, uint32_t r2, uint32_t r3,
         break;
     }
 
-    s390_get_feat_block(type, subfunc);
+    s390_get_feat_block(env->uc, type, subfunc);
     if (!test_be_bit(fc, subfunc)) {
         tcg_s390_program_interrupt(env, PGM_SPECIFICATION, ra);
     }

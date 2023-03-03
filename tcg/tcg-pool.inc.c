@@ -33,7 +33,7 @@ typedef struct TCGLabelPoolData {
 static TCGLabelPoolData *new_pool_alloc(TCGContext *s, int nlong, int rtype,
                                         tcg_insn_unit *label, intptr_t addend)
 {
-    TCGLabelPoolData *n = tcg_malloc(sizeof(TCGLabelPoolData)
+    TCGLabelPoolData *n = tcg_malloc(s, sizeof(TCGLabelPoolData)
                                      + sizeof(tcg_target_ulong) * nlong);
 
     n->label = label;
@@ -125,7 +125,7 @@ static int tcg_out_pool_finalize(TCGContext *s)
 {
     TCGLabelPoolData *p = s->pool_labels;
     TCGLabelPoolData *l = NULL;
-    void *a;
+    char *a;
 
     if (p == NULL) {
         return 0;
@@ -141,7 +141,7 @@ static int tcg_out_pool_finalize(TCGContext *s)
     for (; p != NULL; p = p->next) {
         size_t size = sizeof(tcg_target_ulong) * p->nlong;
         if (!l || l->nlong != p->nlong || memcmp(l->data, p->data, size)) {
-            if (unlikely(a > s->code_gen_highwater)) {
+            if (unlikely(a > (char *)s->code_gen_highwater)) {
                 return -1;
             }
             memcpy(a, p->data, size);
@@ -153,6 +153,6 @@ static int tcg_out_pool_finalize(TCGContext *s)
         }
     }
 
-    s->code_ptr = a;
+    s->code_ptr = (tcg_insn_unit *)a;
     return 0;
 }

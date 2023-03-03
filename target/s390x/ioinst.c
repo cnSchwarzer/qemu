@@ -14,8 +14,7 @@
 #include "cpu.h"
 #include "internal.h"
 #include "hw/s390x/ioinst.h"
-#include "trace.h"
-#include "hw/s390x/s390-pci-bus.h"
+//#include "hw/s390x/s390-pci-bus.h"
 
 int ioinst_disassemble_sch_ident(uint32_t value, int *m, int *cssid, int *ssid,
                                  int *schid)
@@ -40,6 +39,7 @@ int ioinst_disassemble_sch_ident(uint32_t value, int *m, int *cssid, int *ssid,
 
 void ioinst_handle_xsch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
 {
+#if 0
     int cssid, ssid, schid, m;
     SubchDev *sch;
 
@@ -54,10 +54,12 @@ void ioinst_handle_xsch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
         return;
     }
     setcc(cpu, css_do_xsch(sch));
+#endif
 }
 
 void ioinst_handle_csch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
 {
+#if 0
     int cssid, ssid, schid, m;
     SubchDev *sch;
 
@@ -72,10 +74,12 @@ void ioinst_handle_csch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
         return;
     }
     setcc(cpu, css_do_csch(sch));
+#endif
 }
 
 void ioinst_handle_hsch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
 {
+#if 0
     int cssid, ssid, schid, m;
     SubchDev *sch;
 
@@ -90,8 +94,10 @@ void ioinst_handle_hsch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
         return;
     }
     setcc(cpu, css_do_hsch(sch));
+#endif
 }
 
+#if 0
 static int ioinst_schib_valid(SCHIB *schib)
 {
     if ((be16_to_cpu(schib->pmcw.flags) & PMCW_FLAGS_MASK_INVALID) ||
@@ -104,9 +110,11 @@ static int ioinst_schib_valid(SCHIB *schib)
     }
     return 1;
 }
+#endif
 
 void ioinst_handle_msch(S390CPU *cpu, uint64_t reg1, uint32_t ipb, uintptr_t ra)
 {
+#if 0
     int cssid, ssid, schid, m;
     SubchDev *sch;
     SCHIB schib;
@@ -135,8 +143,10 @@ void ioinst_handle_msch(S390CPU *cpu, uint64_t reg1, uint32_t ipb, uintptr_t ra)
         return;
     }
     setcc(cpu, css_do_msch(sch, &schib));
+#endif
 }
 
+#if 0
 static void copy_orb_from_guest(ORB *dest, const ORB *src)
 {
     dest->intparm = be32_to_cpu(src->intparm);
@@ -161,9 +171,11 @@ static int ioinst_orb_valid(ORB *orb)
     }
     return 1;
 }
+#endif
 
 void ioinst_handle_ssch(S390CPU *cpu, uint64_t reg1, uint32_t ipb, uintptr_t ra)
 {
+#if 0
     int cssid, ssid, schid, m;
     SubchDev *sch;
     ORB orig_orb, orb;
@@ -193,10 +205,12 @@ void ioinst_handle_ssch(S390CPU *cpu, uint64_t reg1, uint32_t ipb, uintptr_t ra)
         return;
     }
     setcc(cpu, css_do_ssch(sch, &orb));
+#endif
 }
 
 void ioinst_handle_stcrw(S390CPU *cpu, uint32_t ipb, uintptr_t ra)
 {
+#if 0
     CRW crw;
     uint64_t addr;
     int cc;
@@ -221,11 +235,13 @@ void ioinst_handle_stcrw(S390CPU *cpu, uint32_t ipb, uintptr_t ra)
         }
         s390_cpu_virt_mem_handle_exc(cpu, ra);
     }
+#endif
 }
 
 void ioinst_handle_stsch(S390CPU *cpu, uint64_t reg1, uint32_t ipb,
                          uintptr_t ra)
 {
+#if 0
     int cssid, ssid, schid, m;
     SubchDev *sch;
     uint64_t addr;
@@ -286,10 +302,12 @@ void ioinst_handle_stsch(S390CPU *cpu, uint64_t reg1, uint32_t ipb,
         }
     }
     setcc(cpu, cc);
+#endif
 }
 
 int ioinst_handle_tsch(S390CPU *cpu, uint64_t reg1, uint32_t ipb, uintptr_t ra)
 {
+#if 0
     CPUS390XState *env = &cpu->env;
     int cssid, ssid, schid, m;
     SubchDev *sch;
@@ -332,23 +350,24 @@ int ioinst_handle_tsch(S390CPU *cpu, uint64_t reg1, uint32_t ipb, uintptr_t ra)
     }
 
     setcc(cpu, cc);
+#endif
     return 0;
 }
 
-typedef struct ChscReq {
+QEMU_PACK(typedef struct ChscReq {
     uint16_t len;
     uint16_t command;
     uint32_t param0;
     uint32_t param1;
     uint32_t param2;
-} QEMU_PACKED ChscReq;
+}) ChscReq;
 
-typedef struct ChscResp {
+QEMU_PACK(typedef struct ChscResp {
     uint16_t len;
     uint16_t code;
     uint32_t param;
     char data[];
-} QEMU_PACKED ChscResp;
+}) ChscResp;
 
 #define CHSC_MIN_RESP_LEN 0x0008
 
@@ -367,6 +386,7 @@ typedef struct ChscResp {
 #define CHSC_SCPD_01_CHPID 0x000000ff
 static void ioinst_handle_chsc_scpd(ChscReq *req, ChscResp *res)
 {
+#if 0
     uint16_t len = be16_to_cpu(req->len);
     uint32_t param0 = be32_to_cpu(req->param0);
     uint32_t param1 = be32_to_cpu(req->param1);
@@ -416,6 +436,7 @@ static void ioinst_handle_chsc_scpd(ChscReq *req, ChscResp *res)
     res->code = cpu_to_be16(resp_code);
     res->len = cpu_to_be16(CHSC_MIN_RESP_LEN);
     res->param = cpu_to_be32(rfmt);
+#endif
 }
 
 #define CHSC_SCSC_0_M 0x20000000
@@ -424,6 +445,7 @@ static void ioinst_handle_chsc_scpd(ChscReq *req, ChscResp *res)
 #define CHSC_SCSC_0_RES 0xdff000ff
 static void ioinst_handle_chsc_scsc(ChscReq *req, ChscResp *res)
 {
+#if 0
     uint16_t len = be16_to_cpu(req->len);
     uint32_t param0 = be32_to_cpu(req->param0);
     uint8_t cssid;
@@ -473,6 +495,7 @@ static void ioinst_handle_chsc_scsc(ChscReq *req, ChscResp *res)
     res->code = cpu_to_be16(resp_code);
     res->len = cpu_to_be16(CHSC_MIN_RESP_LEN);
     res->param = 0;
+#endif
 }
 
 #define CHSC_SDA_0_FMT 0x0f000000
@@ -482,6 +505,7 @@ static void ioinst_handle_chsc_scsc(ChscReq *req, ChscResp *res)
 #define CHSC_SDA_OC_MSS 0x2
 static void ioinst_handle_chsc_sda(ChscReq *req, ChscResp *res)
 {
+#if 0
     uint16_t resp_code = 0x0001;
     uint16_t len = be16_to_cpu(req->len);
     uint32_t param0 = be32_to_cpu(req->param0);
@@ -523,8 +547,10 @@ out:
     res->code = cpu_to_be16(resp_code);
     res->len = cpu_to_be16(CHSC_MIN_RESP_LEN);
     res->param = 0;
+#endif
 }
 
+#if 0
 static int chsc_sei_nt0_get_event(void *res)
 {
     /* no events yet */
@@ -536,27 +562,31 @@ static int chsc_sei_nt0_have_event(void)
     /* no events yet */
     return 0;
 }
+#endif
 
+#if 0
 static int chsc_sei_nt2_get_event(void *res)
 {
-    if (s390_has_feat(S390_FEAT_ZPCI)) {
-        return pci_chsc_sei_nt2_get_event(res);
+    if (s390_has_feat(uc, S390_FEAT_ZPCI)) {
+        // return pci_chsc_sei_nt2_get_event(res);
     }
     return 1;
 }
 
 static int chsc_sei_nt2_have_event(void)
 {
-    if (s390_has_feat(S390_FEAT_ZPCI)) {
-        return pci_chsc_sei_nt2_have_event();
+    if (s390_has_feat(uc, S390_FEAT_ZPCI)) {
+        // return pci_chsc_sei_nt2_have_event();
     }
     return 0;
 }
+#endif
 
 #define CHSC_SEI_NT0    (1ULL << 63)
 #define CHSC_SEI_NT2    (1ULL << 61)
 static void ioinst_handle_chsc_sei(ChscReq *req, ChscResp *res)
 {
+#if 0
     uint64_t selection_mask = ldq_p(&req->param1);
     uint8_t *res_flags = (uint8_t *)res->data;
     int have_event = 0;
@@ -588,6 +618,7 @@ static void ioinst_handle_chsc_sei(ChscReq *req, ChscResp *res)
         res->code = cpu_to_be16(0x0005);
         res->len = cpu_to_be16(CHSC_MIN_RESP_LEN);
     }
+#endif
 }
 
 static void ioinst_handle_chsc_unimplemented(ChscResp *res)
@@ -608,7 +639,6 @@ void ioinst_handle_chsc(S390CPU *cpu, uint32_t ipb, uintptr_t ra)
     CPUS390XState *env = &cpu->env;
     uint8_t buf[TARGET_PAGE_SIZE];
 
-    trace_ioinst("chsc");
     reg = (ipb >> 20) & 0x00f;
     addr = env->regs[reg];
     /* Page boundary? */
@@ -635,7 +665,6 @@ void ioinst_handle_chsc(S390CPU *cpu, uint32_t ipb, uintptr_t ra)
     memset((char *)req + len, 0, TARGET_PAGE_SIZE - len);
     res = (void *)((char *)req + len);
     command = be16_to_cpu(req->command);
-    trace_ioinst_chsc_cmd(command, len);
     switch (command) {
     case CHSC_SCSC:
         ioinst_handle_chsc_scsc(req, res);
@@ -670,12 +699,11 @@ void ioinst_handle_chsc(S390CPU *cpu, uint32_t ipb, uintptr_t ra)
 void ioinst_handle_schm(S390CPU *cpu, uint64_t reg1, uint64_t reg2,
                         uint32_t ipb, uintptr_t ra)
 {
+#if 0
     uint8_t mbk;
     int update;
     int dct;
     CPUS390XState *env = &cpu->env;
-
-    trace_ioinst("schm");
 
     if (SCHM_REG1_RES(reg1)) {
         s390_program_interrupt(env, PGM_OPERAND, ra);
@@ -692,10 +720,12 @@ void ioinst_handle_schm(S390CPU *cpu, uint64_t reg1, uint64_t reg2,
     }
 
     css_do_schm(mbk, update, dct, update ? reg2 : 0);
+#endif
 }
 
 void ioinst_handle_rsch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
 {
+#if 0
     int cssid, ssid, schid, m;
     SubchDev *sch;
 
@@ -710,6 +740,7 @@ void ioinst_handle_rsch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
         return;
     }
     setcc(cpu, css_do_rsch(sch));
+#endif
 }
 
 #define RCHP_REG1_RES(_reg) (_reg & 0x00000000ff00ff00)
@@ -717,6 +748,7 @@ void ioinst_handle_rsch(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
 #define RCHP_REG1_CHPID(_reg) (_reg & 0x00000000000000ff)
 void ioinst_handle_rchp(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
 {
+#if 0
     int cc;
     uint8_t cssid;
     uint8_t chpid;
@@ -730,8 +762,6 @@ void ioinst_handle_rchp(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
 
     cssid = RCHP_REG1_CSSID(reg1);
     chpid = RCHP_REG1_CHPID(reg1);
-
-    trace_ioinst_chp_id("rchp", cssid, chpid);
 
     ret = css_do_rchp(cssid, chpid);
 
@@ -751,6 +781,7 @@ void ioinst_handle_rchp(S390CPU *cpu, uint64_t reg1, uintptr_t ra)
         return;
     }
     setcc(cpu, cc);
+#endif
 }
 
 #define SAL_REG1_INVALID(_reg) (_reg & 0x0000000080000000)

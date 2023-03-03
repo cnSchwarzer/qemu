@@ -14,7 +14,6 @@
 #include "internals.h"
 #include "arm-powerctl.h"
 #include "qemu/log.h"
-#include "qemu/main-loop.h"
 
 #ifndef DEBUG_ARM_POWERCTL
 #define DEBUG_ARM_POWERCTL 0
@@ -136,7 +135,6 @@ static void arm_set_cpu_on_async_work(CPUState *target_cpu_state,
     g_free(info);
 
     /* Finally set the power status */
-    assert(qemu_mutex_iothread_locked());
     target_cpu->power_state = PSCI_ON;
 }
 
@@ -146,8 +144,6 @@ int arm_set_cpu_on(uint64_t cpuid, uint64_t entry, uint64_t context_id,
     CPUState *target_cpu_state;
     ARMCPU *target_cpu;
     struct CpuOnInfo *info;
-
-    assert(qemu_mutex_iothread_locked());
 
     DPRINTF("cpu %" PRId64 " (EL %d, %s) @ 0x%" PRIx64 " with R0 = 0x%" PRIx64
             "\n", cpuid, target_el, target_aa64 ? "aarch64" : "aarch32", entry,
@@ -244,7 +240,6 @@ static void arm_set_cpu_on_and_reset_async_work(CPUState *target_cpu_state,
     target_cpu_state->halted = 0;
 
     /* Finally set the power status */
-    assert(qemu_mutex_iothread_locked());
     target_cpu->power_state = PSCI_ON;
 }
 
@@ -252,8 +247,6 @@ int arm_set_cpu_on_and_reset(uint64_t cpuid)
 {
     CPUState *target_cpu_state;
     ARMCPU *target_cpu;
-
-    assert(qemu_mutex_iothread_locked());
 
     /* Retrieve the cpu we are powering up */
     target_cpu_state = arm_get_cpu_by_id(cpuid);
@@ -295,7 +288,6 @@ static void arm_set_cpu_off_async_work(CPUState *target_cpu_state,
 {
     ARMCPU *target_cpu = ARM_CPU(target_cpu_state);
 
-    assert(qemu_mutex_iothread_locked());
     target_cpu->power_state = PSCI_OFF;
     target_cpu_state->halted = 1;
     target_cpu_state->exception_index = EXCP_HLT;
@@ -305,8 +297,6 @@ int arm_set_cpu_off(uint64_t cpuid)
 {
     CPUState *target_cpu_state;
     ARMCPU *target_cpu;
-
-    assert(qemu_mutex_iothread_locked());
 
     DPRINTF("cpu %" PRId64 "\n", cpuid);
 
@@ -341,8 +331,6 @@ int arm_reset_cpu(uint64_t cpuid)
 {
     CPUState *target_cpu_state;
     ARMCPU *target_cpu;
-
-    assert(qemu_mutex_iothread_locked());
 
     DPRINTF("cpu %" PRId64 "\n", cpuid);
 

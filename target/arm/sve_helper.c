@@ -63,7 +63,11 @@ static uint32_t iter_predtest_fwd(uint64_t d, uint64_t g, uint32_t flags)
         /* Compute N from first D & G.
            Use bit 2 to signal first G bit seen.  */
         if (!(flags & 4)) {
+#ifdef _MSC_VER
+            flags |= ((d & (g & (0 - g))) != 0) << 31;
+#else
             flags |= ((d & (g & -g)) != 0) << 31;
+#endif
             flags |= 4;
         }
 
@@ -93,7 +97,11 @@ static uint32_t iter_predtest_bwd(uint64_t d, uint64_t g, uint32_t flags)
         flags |= ((d & g) != 0) << 1;
 
         /* Compute N from last (i.e first) D & G.  Replace previous.  */
+#ifdef _MSC_VER
+        flags = deposit32(flags, 31, 1, (d & (g & (0 - g))) != 0);
+#else
         flags = deposit32(flags, 31, 1, (d & (g & -g)) != 0);
+#endif
     }
     return flags;
 }
@@ -334,12 +342,12 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, void *vg, uint32_t desc) \
 {                                                                       \
     intptr_t i, opr_sz = simd_oprsz(desc);                              \
     for (i = 0; i < opr_sz; ) {                                         \
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));                 \
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));                 \
         do {                                                            \
             if (pg & 1) {                                               \
-                TYPE nn = *(TYPE *)(vn + H(i));                         \
-                TYPE mm = *(TYPE *)(vm + H(i));                         \
-                *(TYPE *)(vd + H(i)) = OP(nn, mm);                      \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                         \
+                TYPE mm = *(TYPE *)((char *)vm + H(i));                         \
+                *(TYPE *)((char *)vd + H(i)) = OP(nn, mm);                      \
             }                                                           \
             i += sizeof(TYPE), pg >>= sizeof(TYPE);                     \
         } while (i & 15);                                               \
@@ -529,12 +537,12 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, void *vg, uint32_t desc) \
 {                                                                       \
     intptr_t i, opr_sz = simd_oprsz(desc);                              \
     for (i = 0; i < opr_sz; ) {                                         \
-        uint8_t pg = *(uint8_t *)(vg + H1(i >> 3));                     \
-        TYPEW mm = *(TYPEW *)(vm + i);                                  \
+        uint8_t pg = *(uint8_t *)((char *)vg + H1(i >> 3));                     \
+        TYPEW mm = *(TYPEW *)((char *)vm + i);                                  \
         do {                                                            \
             if (pg & 1) {                                               \
-                TYPE nn = *(TYPE *)(vn + H(i));                         \
-                *(TYPE *)(vd + H(i)) = OP(nn, mm);                      \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                         \
+                *(TYPE *)((char *)vd + H(i)) = OP(nn, mm);                      \
             }                                                           \
             i += sizeof(TYPE), pg >>= sizeof(TYPE);                     \
         } while (i & 7);                                                \
@@ -562,11 +570,11 @@ void HELPER(NAME)(void *vd, void *vn, void *vg, uint32_t desc)  \
 {                                                               \
     intptr_t i, opr_sz = simd_oprsz(desc);                      \
     for (i = 0; i < opr_sz; ) {                                 \
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));         \
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));         \
         do {                                                    \
             if (pg & 1) {                                       \
-                TYPE nn = *(TYPE *)(vn + H(i));                 \
-                *(TYPE *)(vd + H(i)) = OP(nn);                  \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                 \
+                *(TYPE *)((char *)vd + H(i)) = OP(nn);                  \
             }                                                   \
             i += sizeof(TYPE), pg >>= sizeof(TYPE);             \
         } while (i & 15);                                       \
@@ -616,17 +624,37 @@ DO_ZPZ(sve_cnot_h, uint16_t, H1_2, DO_CNOT)
 DO_ZPZ(sve_cnot_s, uint32_t, H1_4, DO_CNOT)
 DO_ZPZ_D(sve_cnot_d, uint64_t, DO_CNOT)
 
+#ifdef _MSC_VER
+#define DO_FABS16(N)    (N & ((uint16_t)-1 >> 1))
+#define DO_FABS32(N)    (N & ((uint32_t)-1 >> 1))
+#define DO_FABS64(N)    (N & ((uint64_t)-1 >> 1))
+
+DO_ZPZ(sve_fabs_h, uint16_t, H1_2, DO_FABS16)
+DO_ZPZ(sve_fabs_s, uint32_t, H1_4, DO_FABS32)
+DO_ZPZ_D(sve_fabs_d, uint64_t, DO_FABS64)
+#else
 #define DO_FABS(N)    (N & ((__typeof(N))-1 >> 1))
 
 DO_ZPZ(sve_fabs_h, uint16_t, H1_2, DO_FABS)
 DO_ZPZ(sve_fabs_s, uint32_t, H1_4, DO_FABS)
 DO_ZPZ_D(sve_fabs_d, uint64_t, DO_FABS)
+#endif
 
+#ifdef _MSC_VER
+#define DO_FNEG16(N)    (N ^ ~((uint16_t)-1 >> 1))
+#define DO_FNEG32(N)    (N ^ ~((uint32_t)-1 >> 1))
+#define DO_FNEG64(N)    (N ^ ~((uint64_t)-1 >> 1))
+
+DO_ZPZ(sve_fneg_h, uint16_t, H1_2, DO_FNEG16)
+DO_ZPZ(sve_fneg_s, uint32_t, H1_4, DO_FNEG32)
+DO_ZPZ_D(sve_fneg_d, uint64_t, DO_FNEG64)
+#else
 #define DO_FNEG(N)    (N ^ ~((__typeof(N))-1 >> 1))
 
 DO_ZPZ(sve_fneg_h, uint16_t, H1_2, DO_FNEG)
 DO_ZPZ(sve_fneg_s, uint32_t, H1_4, DO_FNEG)
 DO_ZPZ_D(sve_fneg_d, uint64_t, DO_FNEG)
+#endif
 
 #define DO_NOT(N)    (~N)
 
@@ -656,14 +684,22 @@ DO_ZPZ_D(sve_uxtb_d, uint64_t, DO_UXTB)
 DO_ZPZ_D(sve_uxth_d, uint64_t, DO_UXTH)
 DO_ZPZ_D(sve_uxtw_d, uint64_t, DO_UXTS)
 
+#ifdef _MSC_VER
+#define DO_ABS(N)    (N < 0 ? (0 - N) : N)
+#else
 #define DO_ABS(N)    (N < 0 ? -N : N)
+#endif
 
 DO_ZPZ(sve_abs_b, int8_t, H1, DO_ABS)
 DO_ZPZ(sve_abs_h, int16_t, H1_2, DO_ABS)
 DO_ZPZ(sve_abs_s, int32_t, H1_4, DO_ABS)
 DO_ZPZ_D(sve_abs_d, int64_t, DO_ABS)
 
+#ifdef _MSC_VER
+#define DO_NEG(N)    (0 - N)
+#else
 #define DO_NEG(N)    (-N)
+#endif
 
 DO_ZPZ(sve_neg_b, uint8_t, H1, DO_NEG)
 DO_ZPZ(sve_neg_h, uint16_t, H1_2, DO_NEG)
@@ -691,10 +727,10 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, uint32_t desc) \
 {                                                              \
     intptr_t i, opr_sz = simd_oprsz(desc);                     \
     for (i = 0; i < opr_sz; ) {                                \
-        TYPEW mm = *(TYPEW *)(vm + i);                         \
+        TYPEW mm = *(TYPEW *)((char *)vm + i);                         \
         do {                                                   \
-            TYPE nn = *(TYPE *)(vn + H(i));                    \
-            *(TYPE *)(vd + H(i)) = OP(nn, mm);                 \
+            TYPE nn = *(TYPE *)((char *)vn + H(i));                    \
+            *(TYPE *)((char *)vd + H(i)) = OP(nn, mm);                 \
             i += sizeof(TYPE);                                 \
         } while (i & 7);                                       \
     }                                                          \
@@ -741,10 +777,10 @@ uint64_t HELPER(NAME)(void *vn, void *vg, uint32_t desc)   \
     intptr_t i, opr_sz = simd_oprsz(desc);                 \
     TYPERED ret = INIT;                                    \
     for (i = 0; i < opr_sz; ) {                            \
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));    \
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));    \
         do {                                               \
             if (pg & 1) {                                  \
-                TYPEELT nn = *(TYPEELT *)(vn + H(i));      \
+                TYPEELT nn = *(TYPEELT *)((char *)vn + H(i));      \
                 ret = OP(ret, nn);                         \
             }                                              \
             i += sizeof(TYPEELT), pg >>= sizeof(TYPEELT);  \
@@ -902,7 +938,11 @@ uint32_t HELPER(sve_pfirst)(void *vd, void *vg, uint32_t words)
         if (this_g) {
             if (!(flags & 4)) {
                 /* Set in D the first bit of G.  */
+#ifdef _MSC_VER
+                this_d |= this_g & (0 - this_g);
+#else
                 this_d |= this_g & -this_g;
+#endif
                 d[i] = this_d;
             }
             flags = iter_predtest_fwd(this_d, this_g, flags);
@@ -920,7 +960,7 @@ uint32_t HELPER(sve_pnext)(void *vd, void *vg, uint32_t pred_desc)
     uint64_t *d = vd, *g = vg, esz_mask;
     intptr_t i, next;
 
-    next = last_active_element(vd, words, esz) + (1 << esz);
+    next = last_active_element(vd, words, esz) + (1ULL << esz);
     esz_mask = pred_esz_masks[esz];
 
     /* Similar to the pseudocode for pnext, but scaled by ESZ
@@ -1044,7 +1084,11 @@ void HELPER(sve_movz_d)(void *vd, void *vn, void *vg, uint32_t desc)
     uint64_t *d = vd, *n = vn;
     uint8_t *pg = vg;
     for (i = 0; i < opr_sz; i += 1) {
+#ifdef _MSC_VER
+        d[i] = n[i] & ((uint64_t)0 - (uint64_t)(pg[H1(i)] & 1));
+#else
         d[i] = n[i] & -(uint64_t)(pg[H1(i)] & 1);
+#endif
     }
 }
 
@@ -1056,11 +1100,11 @@ void HELPER(NAME)(void *vd, void *vn, void *vg, uint32_t desc)  \
     intptr_t i, opr_sz = simd_oprsz(desc);                      \
     TYPE imm = simd_data(desc);                                 \
     for (i = 0; i < opr_sz; ) {                                 \
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));         \
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));         \
         do {                                                    \
             if (pg & 1) {                                       \
-                TYPE nn = *(TYPE *)(vn + H(i));                 \
-                *(TYPE *)(vd + H(i)) = OP(nn, imm);             \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                 \
+                *(TYPE *)((char *)vd + H(i)) = OP(nn, imm);             \
             }                                                   \
             i += sizeof(TYPE), pg >>= sizeof(TYPE);             \
         } while (i & 15);                                       \
@@ -1089,7 +1133,11 @@ void HELPER(NAME)(void *vd, void *vn, void *vg, uint32_t desc)  \
 /* Arithmetic shift right for division.  This rounds negative numbers
    toward zero as per signed division.  Therefore before shifting,
    when N is negative, add 2**M-1.  */
-#define DO_ASRD(N, M) ((N + (N < 0 ? ((__typeof(N))1 << M) - 1 : 0)) >> M)
+#ifdef _MSC_VER
+ #define DO_ASRD(N, M) ((N + (N < 0 ? (1 << M) - 1 : 0)) >> M)
+#else
+ #define DO_ASRD(N, M) ((N + (N < 0 ? ((__typeof(N))1 << M) - 1 : 0)) >> M)
+#endif
 
 DO_ZPZI(sve_asr_zpzi_b, int8_t, H1, DO_SHR)
 DO_ZPZI(sve_asr_zpzi_h, int16_t, H1_2, DO_SHR)
@@ -1125,13 +1173,13 @@ void HELPER(NAME)(void *vd, void *va, void *vn, void *vm,     \
 {                                                             \
     intptr_t i, opr_sz = simd_oprsz(desc);                    \
     for (i = 0; i < opr_sz; ) {                               \
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));       \
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));       \
         do {                                                  \
             if (pg & 1) {                                     \
-                TYPE nn = *(TYPE *)(vn + H(i));               \
-                TYPE mm = *(TYPE *)(vm + H(i));               \
-                TYPE aa = *(TYPE *)(va + H(i));               \
-                *(TYPE *)(vd + H(i)) = OP(aa, nn, mm);        \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));               \
+                TYPE mm = *(TYPE *)((char *)vm + H(i));               \
+                TYPE aa = *(TYPE *)((char *)va + H(i));               \
+                *(TYPE *)((char *)vd + H(i)) = OP(aa, nn, mm);        \
             }                                                 \
             i += sizeof(TYPE), pg >>= sizeof(TYPE);           \
         } while (i & 15);                                     \
@@ -1395,13 +1443,13 @@ void HELPER(sve_sqaddi_b)(void *d, void *a, int32_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(int8_t)) {
-        int r = *(int8_t *)(a + i) + b;
+        int r = *(int8_t *)((char *)a + i) + b;
         if (r > INT8_MAX) {
             r = INT8_MAX;
         } else if (r < INT8_MIN) {
             r = INT8_MIN;
         }
-        *(int8_t *)(d + i) = r;
+        *(int8_t *)((char *)d + i) = r;
     }
 }
 
@@ -1410,13 +1458,13 @@ void HELPER(sve_sqaddi_h)(void *d, void *a, int32_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(int16_t)) {
-        int r = *(int16_t *)(a + i) + b;
+        int r = *(int16_t *)((char *)a + i) + b;
         if (r > INT16_MAX) {
             r = INT16_MAX;
         } else if (r < INT16_MIN) {
             r = INT16_MIN;
         }
-        *(int16_t *)(d + i) = r;
+        *(int16_t *)((char *)d + i) = r;
     }
 }
 
@@ -1425,13 +1473,13 @@ void HELPER(sve_sqaddi_s)(void *d, void *a, int64_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(int32_t)) {
-        int64_t r = *(int32_t *)(a + i) + b;
+        int64_t r = *(int32_t *)((char *)a + i) + b;
         if (r > INT32_MAX) {
             r = INT32_MAX;
         } else if (r < INT32_MIN) {
             r = INT32_MIN;
         }
-        *(int32_t *)(d + i) = r;
+        *(int32_t *)((char *)d + i) = r;
     }
 }
 
@@ -1440,13 +1488,13 @@ void HELPER(sve_sqaddi_d)(void *d, void *a, int64_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(int64_t)) {
-        int64_t ai = *(int64_t *)(a + i);
+        int64_t ai = *(int64_t *)((char *)a + i);
         int64_t r = ai + b;
         if (((r ^ ai) & ~(ai ^ b)) < 0) {
             /* Signed overflow.  */
             r = (r < 0 ? INT64_MAX : INT64_MIN);
         }
-        *(int64_t *)(d + i) = r;
+        *(int64_t *)((char *)d + i) = r;
     }
 }
 
@@ -1459,13 +1507,13 @@ void HELPER(sve_uqaddi_b)(void *d, void *a, int32_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(uint8_t)) {
-        int r = *(uint8_t *)(a + i) + b;
+        int r = *(uint8_t *)((char *)a + i) + b;
         if (r > UINT8_MAX) {
             r = UINT8_MAX;
         } else if (r < 0) {
             r = 0;
         }
-        *(uint8_t *)(d + i) = r;
+        *(uint8_t *)((char *)d + i) = r;
     }
 }
 
@@ -1474,13 +1522,13 @@ void HELPER(sve_uqaddi_h)(void *d, void *a, int32_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(uint16_t)) {
-        int r = *(uint16_t *)(a + i) + b;
+        int r = *(uint16_t *)((char *)a + i) + b;
         if (r > UINT16_MAX) {
             r = UINT16_MAX;
         } else if (r < 0) {
             r = 0;
         }
-        *(uint16_t *)(d + i) = r;
+        *(uint16_t *)((char *)d + i) = r;
     }
 }
 
@@ -1489,13 +1537,13 @@ void HELPER(sve_uqaddi_s)(void *d, void *a, int64_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(uint32_t)) {
-        int64_t r = *(uint32_t *)(a + i) + b;
+        int64_t r = *(uint32_t *)((char *)a + i) + b;
         if (r > UINT32_MAX) {
             r = UINT32_MAX;
         } else if (r < 0) {
             r = 0;
         }
-        *(uint32_t *)(d + i) = r;
+        *(uint32_t *)((char *)d + i) = r;
     }
 }
 
@@ -1504,11 +1552,11 @@ void HELPER(sve_uqaddi_d)(void *d, void *a, uint64_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(uint64_t)) {
-        uint64_t r = *(uint64_t *)(a + i) + b;
+        uint64_t r = *(uint64_t *)((char *)a + i) + b;
         if (r < b) {
             r = UINT64_MAX;
         }
-        *(uint64_t *)(d + i) = r;
+        *(uint64_t *)((char *)d + i) = r;
     }
 }
 
@@ -1517,8 +1565,8 @@ void HELPER(sve_uqsubi_d)(void *d, void *a, uint64_t b, uint32_t desc)
     intptr_t i, oprsz = simd_oprsz(desc);
 
     for (i = 0; i < oprsz; i += sizeof(uint64_t)) {
-        uint64_t ai = *(uint64_t *)(a + i);
-        *(uint64_t *)(d + i) = (ai < b ? 0 : ai - b);
+        uint64_t ai = *(uint64_t *)((char *)a + i);
+        *(uint64_t *)((char *)d + i) = (ai < b ? 0 : ai - b);
     }
 }
 
@@ -1738,17 +1786,17 @@ void HELPER(sve_ext)(void *vd, void *vn, void *vm, uint32_t desc)
     size_t n_siz = opr_sz - n_ofs;
 
     if (vd != vm) {
-        swap_memmove(vd, vn + n_ofs, n_siz);
-        swap_memmove(vd + n_siz, vm, n_ofs);
+        swap_memmove(vd, (char *)vn + n_ofs, n_siz);
+        swap_memmove((char *)vd + n_siz, vm, n_ofs);
     } else if (vd != vn) {
-        swap_memmove(vd + n_siz, vd, n_ofs);
-        swap_memmove(vd, vn + n_ofs, n_siz);
+        swap_memmove((char *)vd + n_siz, vd, n_ofs);
+        swap_memmove(vd, (char *)vn + n_ofs, n_siz);
     } else {
         /* vd == vn == vm.  Need temp space.  */
         ARMVectorReg tmp;
         swap_memmove(&tmp, vm, n_ofs);
-        swap_memmove(vd, vd + n_ofs, n_siz);
-        memcpy(vd + n_siz, &tmp, n_ofs);
+        swap_memmove(vd, (char *)vd + n_ofs, n_siz);
+        memcpy((char *)vd + n_siz, &tmp, n_ofs);
     }
 }
 
@@ -1756,8 +1804,8 @@ void HELPER(sve_ext)(void *vd, void *vn, void *vm, uint32_t desc)
 void HELPER(NAME)(void *vd, void *vn, uint64_t val, uint32_t desc) \
 {                                                                  \
     intptr_t opr_sz = simd_oprsz(desc);                            \
-    swap_memmove(vd + sizeof(TYPE), vn, opr_sz - sizeof(TYPE));    \
-    *(TYPE *)(vd + H(0)) = val;                                    \
+    swap_memmove((char *)vd + sizeof(TYPE), vn, opr_sz - sizeof(TYPE));    \
+    *(TYPE *)((char *)vd + H(0)) = val;                                    \
 }
 
 DO_INSR(sve_insr_b, uint8_t, H1)
@@ -1771,10 +1819,10 @@ void HELPER(sve_rev_b)(void *vd, void *vn, uint32_t desc)
 {
     intptr_t i, j, opr_sz = simd_oprsz(desc);
     for (i = 0, j = opr_sz - 8; i < opr_sz / 2; i += 8, j -= 8) {
-        uint64_t f = *(uint64_t *)(vn + i);
-        uint64_t b = *(uint64_t *)(vn + j);
-        *(uint64_t *)(vd + i) = bswap64(b);
-        *(uint64_t *)(vd + j) = bswap64(f);
+        uint64_t f = *(uint64_t *)((char *)vn + i);
+        uint64_t b = *(uint64_t *)((char *)vn + j);
+        *(uint64_t *)((char *)vd + i) = bswap64(b);
+        *(uint64_t *)((char *)vd + j) = bswap64(f);
     }
 }
 
@@ -1782,10 +1830,10 @@ void HELPER(sve_rev_h)(void *vd, void *vn, uint32_t desc)
 {
     intptr_t i, j, opr_sz = simd_oprsz(desc);
     for (i = 0, j = opr_sz - 8; i < opr_sz / 2; i += 8, j -= 8) {
-        uint64_t f = *(uint64_t *)(vn + i);
-        uint64_t b = *(uint64_t *)(vn + j);
-        *(uint64_t *)(vd + i) = hswap64(b);
-        *(uint64_t *)(vd + j) = hswap64(f);
+        uint64_t f = *(uint64_t *)((char *)vn + i);
+        uint64_t b = *(uint64_t *)((char *)vn + j);
+        *(uint64_t *)((char *)vd + i) = hswap64(b);
+        *(uint64_t *)((char *)vd + j) = hswap64(f);
     }
 }
 
@@ -1793,10 +1841,10 @@ void HELPER(sve_rev_s)(void *vd, void *vn, uint32_t desc)
 {
     intptr_t i, j, opr_sz = simd_oprsz(desc);
     for (i = 0, j = opr_sz - 8; i < opr_sz / 2; i += 8, j -= 8) {
-        uint64_t f = *(uint64_t *)(vn + i);
-        uint64_t b = *(uint64_t *)(vn + j);
-        *(uint64_t *)(vd + i) = rol64(b, 32);
-        *(uint64_t *)(vd + j) = rol64(f, 32);
+        uint64_t f = *(uint64_t *)((char *)vn + i);
+        uint64_t b = *(uint64_t *)((char *)vn + j);
+        *(uint64_t *)((char *)vd + i) = rol64(b, 32);
+        *(uint64_t *)((char *)vd + j) = rol64(f, 32);
     }
 }
 
@@ -1804,10 +1852,10 @@ void HELPER(sve_rev_d)(void *vd, void *vn, uint32_t desc)
 {
     intptr_t i, j, opr_sz = simd_oprsz(desc);
     for (i = 0, j = opr_sz - 8; i < opr_sz / 2; i += 8, j -= 8) {
-        uint64_t f = *(uint64_t *)(vn + i);
-        uint64_t b = *(uint64_t *)(vn + j);
-        *(uint64_t *)(vd + i) = b;
-        *(uint64_t *)(vd + j) = f;
+        uint64_t f = *(uint64_t *)((char *)vn + i);
+        uint64_t b = *(uint64_t *)((char *)vn + j);
+        *(uint64_t *)((char *)vd + i) = b;
+        *(uint64_t *)((char *)vd + j) = f;
     }
 }
 
@@ -1841,7 +1889,7 @@ void HELPER(NAME)(void *vd, void *vn, uint32_t desc)           \
     TYPED *d = vd;                                             \
     TYPES *n = vn;                                             \
     ARMVectorReg tmp;                                          \
-    if (unlikely(vn - vd < opr_sz)) {                          \
+    if (unlikely((char *)vn - (char *)vd < opr_sz)) {                          \
         n = memcpy(&tmp, n, opr_sz / 2);                       \
     }                                                          \
     for (i = 0; i < opr_sz / sizeof(TYPED); i++) {             \
@@ -1928,10 +1976,10 @@ void HELPER(sve_zip_p)(void *vd, void *vn, void *vm, uint32_t pred_desc)
 
         /* We produce output faster than we consume input.
            Therefore we must be mindful of possible overlap.  */
-        if ((vn - vd) < (uintptr_t)oprsz) {
+        if (((char *)vn - (char *)vd) < (uintptr_t)oprsz) {
             vn = memcpy(&tmp_n, vn, oprsz);
         }
-        if ((vm - vd) < (uintptr_t)oprsz) {
+        if (((char *)vm - (char *)vd) < (uintptr_t)oprsz) {
             vm = memcpy(&tmp_m, vm, oprsz);
         }
         if (high) {
@@ -1983,7 +2031,7 @@ void HELPER(sve_uzp_p)(void *vd, void *vn, void *vm, uint32_t pred_desc)
         ARMPredicateReg tmp_m;
         intptr_t oprsz_16 = oprsz / 16;
 
-        if ((vm - vd) < (uintptr_t)oprsz) {
+        if (((char *)vm - (char *)vd) < (uintptr_t)oprsz) {
             m = memcpy(&tmp_m, vm, oprsz);
         }
 
@@ -2010,7 +2058,7 @@ void HELPER(sve_uzp_p)(void *vd, void *vn, void *vm, uint32_t pred_desc)
             }
             tmp_m.p[i] = compress_bits(m[2 * i] >> odd, esz);
 
-            swap_memmove(vd + oprsz / 2, &tmp_m, oprsz / 2);
+            swap_memmove((char *)vd + oprsz / 2, &tmp_m, oprsz / 2);
         } else {
             for (i = 0; i < oprsz_16; i++) {
                 l = m[2 * i + 0];
@@ -2086,19 +2134,19 @@ void HELPER(sve_rev_p)(void *vd, void *vn, uint32_t pred_desc)
     } else if ((oprsz & 15) == 0) {
         for (i = 0; i < oprsz_2; i += 8) {
             intptr_t ih = oprsz - 8 - i;
-            uint64_t l = reverse_bits_64(*(uint64_t *)(vn + i), esz);
-            uint64_t h = reverse_bits_64(*(uint64_t *)(vn + ih), esz);
-            *(uint64_t *)(vd + i) = h;
-            *(uint64_t *)(vd + ih) = l;
+            uint64_t l = reverse_bits_64(*(uint64_t *)((char *)vn + i), esz);
+            uint64_t h = reverse_bits_64(*(uint64_t *)((char *)vn + ih), esz);
+            *(uint64_t *)((char *)vd + i) = h;
+            *(uint64_t *)((char *)vd + ih) = l;
         }
     } else {
         for (i = 0; i < oprsz_2; i += 1) {
             intptr_t il = H1(i);
             intptr_t ih = H1(oprsz - 1 - i);
-            uint8_t l = reverse_bits_8(*(uint8_t *)(vn + il), esz);
-            uint8_t h = reverse_bits_8(*(uint8_t *)(vn + ih), esz);
-            *(uint8_t *)(vd + il) = h;
-            *(uint8_t *)(vd + ih) = l;
+            uint8_t l = reverse_bits_8(*(uint8_t *)((char *)vn + il), esz);
+            uint8_t h = reverse_bits_8(*(uint8_t *)((char *)vn + ih), esz);
+            *(uint8_t *)((char *)vd + il) = h;
+            *(uint8_t *)((char *)vd + ih) = l;
         }
     }
 }
@@ -2122,7 +2170,7 @@ void HELPER(sve_punpk_p)(void *vd, void *vn, uint32_t pred_desc)
 
         /* We produce output faster than we consume input.
            Therefore we must be mindful of possible overlap.  */
-        if ((vn - vd) < (uintptr_t)oprsz) {
+        if (((char *)vn - (char *)vd) < (uintptr_t)oprsz) {
             vn = memcpy(&tmp_n, vn, oprsz);
         }
         if (high) {
@@ -2157,15 +2205,15 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, uint32_t desc)       \
     ARMVectorReg tmp_n, tmp_m;                                       \
     /* We produce output faster than we consume input.               \
        Therefore we must be mindful of possible overlap.  */         \
-    if (unlikely((vn - vd) < (uintptr_t)oprsz)) {                    \
+    if (unlikely(((char *)vn - (char *)vd) < (uintptr_t)oprsz)) {                    \
         vn = memcpy(&tmp_n, vn, oprsz_2);                            \
     }                                                                \
-    if (unlikely((vm - vd) < (uintptr_t)oprsz)) {                    \
+    if (unlikely(((char *)vm - (char *)vd) < (uintptr_t)oprsz)) {                    \
         vm = memcpy(&tmp_m, vm, oprsz_2);                            \
     }                                                                \
     for (i = 0; i < oprsz_2; i += sizeof(TYPE)) {                    \
-        *(TYPE *)(vd + H(2 * i + 0)) = *(TYPE *)(vn + H(i));         \
-        *(TYPE *)(vd + H(2 * i + sizeof(TYPE))) = *(TYPE *)(vm + H(i)); \
+        *(TYPE *)((char *)vd + H(2 * i + 0)) = *(TYPE *)((char *)vn + H(i));         \
+        *(TYPE *)((char *)vd + H(2 * i + sizeof(TYPE))) = *(TYPE *)((char *)vm + H(i)); \
     }                                                                \
 }
 
@@ -2182,14 +2230,14 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, uint32_t desc)         \
     intptr_t odd_ofs = simd_data(desc);                                \
     intptr_t i;                                                        \
     ARMVectorReg tmp_m;                                                \
-    if (unlikely((vm - vd) < (uintptr_t)oprsz)) {                      \
+    if (unlikely(((char *)vm - (char *)vd) < (uintptr_t)oprsz)) {                      \
         vm = memcpy(&tmp_m, vm, oprsz);                                \
     }                                                                  \
     for (i = 0; i < oprsz_2; i += sizeof(TYPE)) {                      \
-        *(TYPE *)(vd + H(i)) = *(TYPE *)(vn + H(2 * i + odd_ofs));     \
+        *(TYPE *)((char *)vd + H(i)) = *(TYPE *)((char *)vn + H(2 * i + odd_ofs));     \
     }                                                                  \
     for (i = 0; i < oprsz_2; i += sizeof(TYPE)) {                      \
-        *(TYPE *)(vd + H(oprsz_2 + i)) = *(TYPE *)(vm + H(2 * i + odd_ofs)); \
+        *(TYPE *)((char *)vd + H(oprsz_2 + i)) = *(TYPE *)((char *)vm + H(2 * i + odd_ofs)); \
     }                                                                  \
 }
 
@@ -2205,10 +2253,10 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, uint32_t desc)         \
     intptr_t odd_ofs = simd_data(desc);                                \
     intptr_t i;                                                        \
     for (i = 0; i < oprsz; i += 2 * sizeof(TYPE)) {                    \
-        TYPE ae = *(TYPE *)(vn + H(i + odd_ofs));                      \
-        TYPE be = *(TYPE *)(vm + H(i + odd_ofs));                      \
-        *(TYPE *)(vd + H(i + 0)) = ae;                                 \
-        *(TYPE *)(vd + H(i + sizeof(TYPE))) = be;                      \
+        TYPE ae = *(TYPE *)((char *)vn + H(i + odd_ofs));                      \
+        TYPE be = *(TYPE *)((char *)vm + H(i + odd_ofs));                      \
+        *(TYPE *)((char *)vd + H(i + 0)) = ae;                                 \
+        *(TYPE *)((char *)vd + H(i + sizeof(TYPE))) = be;                      \
     }                                                                  \
 }
 
@@ -2280,7 +2328,7 @@ void HELPER(sve_splice)(void *vd, void *vn, void *vm, void *vg, uint32_t desc)
 
     /* Find the extent of the active elements within VG.  */
     for (i = QEMU_ALIGN_UP(opr_sz, 8) - 8; i >= 0; i -= 8) {
-        pg = *(uint64_t *)(vg + i) & mask;
+        pg = *(uint64_t *)((char *)vg + i) & mask;
         if (pg) {
             if (last_g == 0) {
                 last_g = pg;
@@ -2295,13 +2343,13 @@ void HELPER(sve_splice)(void *vd, void *vn, void *vm, void *vg, uint32_t desc)
     if (first_g != 0) {
         first_i = first_i * 8 + ctz64(first_g);
         last_i = last_i * 8 + 63 - clz64(last_g);
-        len = last_i - first_i + (1 << esz);
+        len = last_i - first_i + (1ULL << esz);
         if (vd == vm) {
             vm = memcpy(&tmp, vm, opr_sz * 8);
         }
-        swap_memmove(vd, vn + first_i, len);
+        swap_memmove(vd, (char *)vn + first_i, len);
     }
-    swap_memmove(vd + len, vm, opr_sz * 8 - len);
+    swap_memmove((char *)vd + len, vm, opr_sz * 8 - len);
 }
 
 void HELPER(sve_sel_zpzz_b)(void *vd, void *vn, void *vm,
@@ -2390,13 +2438,13 @@ uint32_t HELPER(NAME)(void *vd, void *vn, void *vm, void *vg, uint32_t desc) \
         uint64_t out = 0, pg;                                                \
         do {                                                                 \
             i -= sizeof(TYPE), out <<= sizeof(TYPE);                         \
-            TYPE nn = *(TYPE *)(vn + H(i));                                  \
-            TYPE mm = *(TYPE *)(vm + H(i));                                  \
+            TYPE nn = *(TYPE *)((char *)vn + H(i));                                  \
+            TYPE mm = *(TYPE *)((char *)vm + H(i));                                  \
             out |= nn OP mm;                                                 \
         } while (i & 63);                                                    \
-        pg = *(uint64_t *)(vg + (i >> 3)) & MASK;                            \
+        pg = *(uint64_t *)((char *)vg + (i >> 3)) & MASK;                            \
         out &= pg;                                                           \
-        *(uint64_t *)(vd + (i >> 3)) = out;                                  \
+        *(uint64_t *)((char *)vd + (i >> 3)) = out;                                  \
         flags = iter_predtest_bwd(out, pg, flags);                           \
     } while (i > 0);                                                         \
     return flags;                                                            \
@@ -2457,16 +2505,16 @@ uint32_t HELPER(NAME)(void *vd, void *vn, void *vm, void *vg, uint32_t desc) \
     do {                                                                     \
         uint64_t out = 0, pg;                                                \
         do {                                                                 \
-            TYPEW mm = *(TYPEW *)(vm + i - 8);                               \
+            TYPEW mm = *(TYPEW *)((char *)vm + i - 8);                               \
             do {                                                             \
                 i -= sizeof(TYPE), out <<= sizeof(TYPE);                     \
-                TYPE nn = *(TYPE *)(vn + H(i));                              \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                              \
                 out |= nn OP mm;                                             \
             } while (i & 7);                                                 \
         } while (i & 63);                                                    \
-        pg = *(uint64_t *)(vg + (i >> 3)) & MASK;                            \
+        pg = *(uint64_t *)((char *)vg + (i >> 3)) & MASK;                            \
         out &= pg;                                                           \
-        *(uint64_t *)(vd + (i >> 3)) = out;                                  \
+        *(uint64_t *)((char *)vd + (i >> 3)) = out;                                  \
         flags = iter_predtest_bwd(out, pg, flags);                           \
     } while (i > 0);                                                         \
     return flags;                                                            \
@@ -2536,12 +2584,12 @@ uint32_t HELPER(NAME)(void *vd, void *vn, void *vg, uint32_t desc)   \
         uint64_t out = 0, pg;                                        \
         do {                                                         \
             i -= sizeof(TYPE), out <<= sizeof(TYPE);                 \
-            TYPE nn = *(TYPE *)(vn + H(i));                          \
+            TYPE nn = *(TYPE *)((char *)vn + H(i));                          \
             out |= nn OP mm;                                         \
         } while (i & 63);                                            \
-        pg = *(uint64_t *)(vg + (i >> 3)) & MASK;                    \
+        pg = *(uint64_t *)((char *)vg + (i >> 3)) & MASK;                    \
         out &= pg;                                                   \
-        *(uint64_t *)(vd + (i >> 3)) = out;                          \
+        *(uint64_t *)((char *)vd + (i >> 3)) = out;                          \
         flags = iter_predtest_bwd(out, pg, flags);                   \
     } while (i > 0);                                                 \
     return flags;                                                    \
@@ -2618,9 +2666,9 @@ static bool last_active_pred(void *vd, void *vg, intptr_t oprsz)
     intptr_t i;
 
     for (i = QEMU_ALIGN_UP(oprsz, 8) - 8; i >= 0; i -= 8) {
-        uint64_t pg = *(uint64_t *)(vg + i);
+        uint64_t pg = *(uint64_t *)((char *)vg + i);
         if (pg) {
-            return (pow2floor(pg) & *(uint64_t *)(vd + i)) != 0;
+            return (pow2floor(pg) & *(uint64_t *)((char *)vd + i)) != 0;
         }
     }
     return 0;
@@ -2643,7 +2691,11 @@ static bool compute_brk(uint64_t *retb, uint64_t n, uint64_t g,
     } else {
         /* Break somewhere in N.  Locate it.  */
         b = g & n;            /* guard true, pred true */
+#ifdef _MSC_VER
+        b = b & (0 - b);      /* first such */
+#else
         b = b & -b;           /* first such */
+#endif
         if (after) {
             b = b | (b - 1);  /* break after same */
         } else {
@@ -2843,7 +2895,7 @@ static uint32_t predtest_ones(ARMPredicateReg *d, intptr_t oprsz,
         flags = iter_predtest_fwd(d->p[i], esz_mask, flags);
     }
     if (oprsz & 7) {
-        uint64_t mask = ~(-1ULL << (8 * (oprsz & 7)));
+        uint64_t mask = ~(0xffffffffffffffffULL << (8 * (oprsz & 7)));
         flags = iter_predtest_fwd(d->p[i], esz_mask & mask, flags);
     }
     return flags;
@@ -2925,15 +2977,15 @@ uint64_t HELPER(NAME)(void *vn, void *vg, void *vs, uint32_t desc)    \
     uintptr_t i, oprsz = simd_oprsz(desc), maxsz = simd_maxsz(desc);  \
     TYPE data[sizeof(ARMVectorReg) / sizeof(TYPE)];                   \
     for (i = 0; i < oprsz; ) {                                        \
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));               \
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));               \
         do {                                                          \
-            TYPE nn = *(TYPE *)(vn + H(i));                           \
-            *(TYPE *)((void *)data + i) = (pg & 1 ? nn : IDENT);      \
+            TYPE nn = *(TYPE *)((char *)vn + H(i));                           \
+            *(TYPE *)((char *)data + i) = (pg & 1 ? nn : IDENT);      \
             i += sizeof(TYPE), pg >>= sizeof(TYPE);                   \
         } while (i & 15);                                             \
     }                                                                 \
     for (; i < maxsz; i += sizeof(TYPE)) {                            \
-        *(TYPE *)((void *)data + i) = IDENT;                          \
+        *(TYPE *)((char *)data + i) = IDENT;                          \
     }                                                                 \
     return NAME##_reduce(data, vs, maxsz / sizeof(TYPE));             \
 }
@@ -2968,10 +3020,10 @@ uint64_t HELPER(sve_fadda_h)(uint64_t nn, void *vm, void *vg,
     float16 result = nn;
 
     do {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
-                float16 mm = *(float16 *)(vm + H1_2(i));
+                float16 mm = *(float16 *)((char *)vm + H1_2(i));
                 result = float16_add(result, mm, status);
             }
             i += sizeof(float16), pg >>= sizeof(float16);
@@ -2988,10 +3040,10 @@ uint64_t HELPER(sve_fadda_s)(uint64_t nn, void *vm, void *vg,
     float32 result = nn;
 
     do {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
-                float32 mm = *(float32 *)(vm + H1_2(i));
+                float32 mm = *(float32 *)((char *)vm + H1_2(i));
                 result = float32_add(result, mm, status);
             }
             i += sizeof(float32), pg >>= sizeof(float32);
@@ -3031,9 +3083,9 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, void *vg,       \
         do {                                                    \
             i -= sizeof(TYPE);                                  \
             if (likely((pg >> (i & 63)) & 1)) {                 \
-                TYPE nn = *(TYPE *)(vn + H(i));                 \
-                TYPE mm = *(TYPE *)(vm + H(i));                 \
-                *(TYPE *)(vd + H(i)) = OP(nn, mm, status);      \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                 \
+                TYPE mm = *(TYPE *)((char *)vm + H(i));                 \
+                *(TYPE *)((char *)vd + H(i)) = OP(nn, mm, status);      \
             }                                                   \
         } while (i & 63);                                       \
     } while (i != 0);                                           \
@@ -3121,8 +3173,8 @@ void HELPER(NAME)(void *vd, void *vn, void *vg, uint64_t scalar,  \
         do {                                                      \
             i -= sizeof(TYPE);                                    \
             if (likely((pg >> (i & 63)) & 1)) {                   \
-                TYPE nn = *(TYPE *)(vn + H(i));                   \
-                *(TYPE *)(vd + H(i)) = OP(nn, mm, status);        \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                   \
+                *(TYPE *)((char *)vd + H(i)) = OP(nn, mm, status);        \
             }                                                     \
         } while (i & 63);                                         \
     } while (i != 0);                                             \
@@ -3188,8 +3240,8 @@ void HELPER(NAME)(void *vd, void *vn, void *vg, void *status, uint32_t desc) \
         do {                                                          \
             i -= sizeof(TYPE);                                        \
             if (likely((pg >> (i & 63)) & 1)) {                       \
-                TYPE nn = *(TYPE *)(vn + H(i));                       \
-                *(TYPE *)(vd + H(i)) = OP(nn, status);                \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                       \
+                *(TYPE *)((char *)vd + H(i)) = OP(nn, status);                \
             }                                                         \
         } while (i & 63);                                             \
     } while (i != 0);                                                 \
@@ -3398,11 +3450,11 @@ static void do_fmla_zpzzz_h(CPUARMState *env, void *vg, uint32_t desc,
             if (likely((pg >> (i & 63)) & 1)) {
                 float16 e1, e2, e3, r;
 
-                e1 = *(uint16_t *)(vn + H1_2(i)) ^ neg1;
-                e2 = *(uint16_t *)(vm + H1_2(i));
-                e3 = *(uint16_t *)(va + H1_2(i)) ^ neg3;
+                e1 = *(uint16_t *)((char *)vn + H1_2(i)) ^ neg1;
+                e2 = *(uint16_t *)((char *)vm + H1_2(i));
+                e3 = *(uint16_t *)((char *)va + H1_2(i)) ^ neg3;
                 r = float16_muladd(e1, e2, e3, 0, &env->vfp.fp_status_f16);
-                *(uint16_t *)(vd + H1_2(i)) = r;
+                *(uint16_t *)((char *)vd + H1_2(i)) = r;
             }
         } while (i & 63);
     } while (i != 0);
@@ -3449,11 +3501,11 @@ static void do_fmla_zpzzz_s(CPUARMState *env, void *vg, uint32_t desc,
             if (likely((pg >> (i & 63)) & 1)) {
                 float32 e1, e2, e3, r;
 
-                e1 = *(uint32_t *)(vn + H1_4(i)) ^ neg1;
-                e2 = *(uint32_t *)(vm + H1_4(i));
-                e3 = *(uint32_t *)(va + H1_4(i)) ^ neg3;
+                e1 = *(uint32_t *)((char *)vn + H1_4(i)) ^ neg1;
+                e2 = *(uint32_t *)((char *)vm + H1_4(i));
+                e3 = *(uint32_t *)((char *)va + H1_4(i)) ^ neg3;
                 r = float32_muladd(e1, e2, e3, 0, &env->vfp.fp_status);
-                *(uint32_t *)(vd + H1_4(i)) = r;
+                *(uint32_t *)((char *)vd + H1_4(i)) = r;
             }
         } while (i & 63);
     } while (i != 0);
@@ -3500,11 +3552,11 @@ static void do_fmla_zpzzz_d(CPUARMState *env, void *vg, uint32_t desc,
             if (likely((pg >> (i & 63)) & 1)) {
                 float64 e1, e2, e3, r;
 
-                e1 = *(uint64_t *)(vn + i) ^ neg1;
-                e2 = *(uint64_t *)(vm + i);
-                e3 = *(uint64_t *)(va + i) ^ neg3;
+                e1 = *(uint64_t *)((char *)vn + i) ^ neg1;
+                e2 = *(uint64_t *)((char *)vm + i);
+                e3 = *(uint64_t *)((char *)va + i) ^ neg3;
                 r = float64_muladd(e1, e2, e3, 0, &env->vfp.fp_status);
-                *(uint64_t *)(vd + i) = r;
+                *(uint64_t *)((char *)vd + i) = r;
             }
         } while (i & 63);
     } while (i != 0);
@@ -3546,8 +3598,8 @@ void HELPER(NAME)(void *vd, void *vn, void *vm, void *vg,               \
         do {                                                            \
             i -= sizeof(TYPE), out <<= sizeof(TYPE);                    \
             if (likely((pg >> (i & 63)) & 1)) {                         \
-                TYPE nn = *(TYPE *)(vn + H(i));                         \
-                TYPE mm = *(TYPE *)(vm + H(i));                         \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));                         \
+                TYPE mm = *(TYPE *)((char *)vm + H(i));                         \
                 out |= OP(TYPE, nn, mm, status);                        \
             }                                                           \
         } while (i & 63);                                               \
@@ -3608,7 +3660,7 @@ void HELPER(NAME)(void *vd, void *vn, void *vg,            \
         do {                                               \
             i -= sizeof(TYPE), out <<= sizeof(TYPE);       \
             if ((pg >> (i & 63)) & 1) {                    \
-                TYPE nn = *(TYPE *)(vn + H(i));            \
+                TYPE nn = *(TYPE *)((char *)vn + H(i));            \
                 out |= OP(TYPE, nn, 0, status);            \
             }                                              \
         } while (i & 63);                                  \
@@ -3726,16 +3778,16 @@ void HELPER(sve_fcadd_h)(void *vd, void *vn, void *vm, void *vg,
             j = i - sizeof(float16);
             i -= 2 * sizeof(float16);
 
-            e0 = *(float16 *)(vn + H1_2(i));
-            e1 = *(float16 *)(vm + H1_2(j)) ^ neg_real;
-            e2 = *(float16 *)(vn + H1_2(j));
-            e3 = *(float16 *)(vm + H1_2(i)) ^ neg_imag;
+            e0 = *(float16 *)((char *)vn + H1_2(i));
+            e1 = *(float16 *)((char *)vm + H1_2(j)) ^ neg_real;
+            e2 = *(float16 *)((char *)vn + H1_2(j));
+            e3 = *(float16 *)((char *)vm + H1_2(i)) ^ neg_imag;
 
             if (likely((pg >> (i & 63)) & 1)) {
-                *(float16 *)(vd + H1_2(i)) = float16_add(e0, e1, vs);
+                *(float16 *)((char *)vd + H1_2(i)) = float16_add(e0, e1, vs);
             }
             if (likely((pg >> (j & 63)) & 1)) {
-                *(float16 *)(vd + H1_2(j)) = float16_add(e2, e3, vs);
+                *(float16 *)((char *)vd + H1_2(j)) = float16_add(e2, e3, vs);
             }
         } while (i & 63);
     } while (i != 0);
@@ -3758,16 +3810,16 @@ void HELPER(sve_fcadd_s)(void *vd, void *vn, void *vm, void *vg,
             j = i - sizeof(float32);
             i -= 2 * sizeof(float32);
 
-            e0 = *(float32 *)(vn + H1_2(i));
-            e1 = *(float32 *)(vm + H1_2(j)) ^ neg_real;
-            e2 = *(float32 *)(vn + H1_2(j));
-            e3 = *(float32 *)(vm + H1_2(i)) ^ neg_imag;
+            e0 = *(float32 *)((char *)vn + H1_2(i));
+            e1 = *(float32 *)((char *)vm + H1_2(j)) ^ neg_real;
+            e2 = *(float32 *)((char *)vn + H1_2(j));
+            e3 = *(float32 *)((char *)vm + H1_2(i)) ^ neg_imag;
 
             if (likely((pg >> (i & 63)) & 1)) {
-                *(float32 *)(vd + H1_2(i)) = float32_add(e0, e1, vs);
+                *(float32 *)((char *)vd + H1_2(i)) = float32_add(e0, e1, vs);
             }
             if (likely((pg >> (j & 63)) & 1)) {
-                *(float32 *)(vd + H1_2(j)) = float32_add(e2, e3, vs);
+                *(float32 *)((char *)vd + H1_2(j)) = float32_add(e2, e3, vs);
             }
         } while (i & 63);
     } while (i != 0);
@@ -3790,16 +3842,16 @@ void HELPER(sve_fcadd_d)(void *vd, void *vn, void *vm, void *vg,
             j = i - sizeof(float64);
             i -= 2 * sizeof(float64);
 
-            e0 = *(float64 *)(vn + H1_2(i));
-            e1 = *(float64 *)(vm + H1_2(j)) ^ neg_real;
-            e2 = *(float64 *)(vn + H1_2(j));
-            e3 = *(float64 *)(vm + H1_2(i)) ^ neg_imag;
+            e0 = *(float64 *)((char *)vn + H1_2(i));
+            e1 = *(float64 *)((char *)vm + H1_2(j)) ^ neg_real;
+            e2 = *(float64 *)((char *)vn + H1_2(j));
+            e3 = *(float64 *)((char *)vm + H1_2(i)) ^ neg_imag;
 
             if (likely((pg >> (i & 63)) & 1)) {
-                *(float64 *)(vd + H1_2(i)) = float64_add(e0, e1, vs);
+                *(float64 *)((char *)vd + H1_2(i)) = float64_add(e0, e1, vs);
             }
             if (likely((pg >> (j & 63)) & 1)) {
-                *(float64 *)(vd + H1_2(j)) = float64_add(e2, e3, vs);
+                *(float64 *)((char *)vd + H1_2(j)) = float64_add(e2, e3, vs);
             }
         } while (i & 63);
     } while (i != 0);
@@ -3839,10 +3891,10 @@ void HELPER(sve_fcmla_zpzzz_h)(CPUARMState *env, void *vg, uint32_t desc)
             j = i - sizeof(float16);
             i -= 2 * sizeof(float16);
 
-            nr = *(float16 *)(vn + H1_2(i));
-            ni = *(float16 *)(vn + H1_2(j));
-            mr = *(float16 *)(vm + H1_2(i));
-            mi = *(float16 *)(vm + H1_2(j));
+            nr = *(float16 *)((char *)vn + H1_2(i));
+            ni = *(float16 *)((char *)vn + H1_2(j));
+            mr = *(float16 *)((char *)vm + H1_2(i));
+            mi = *(float16 *)((char *)vm + H1_2(j));
 
             e2 = (flip ? ni : nr);
             e1 = (flip ? mi : mr) ^ neg_real;
@@ -3850,14 +3902,14 @@ void HELPER(sve_fcmla_zpzzz_h)(CPUARMState *env, void *vg, uint32_t desc)
             e3 = (flip ? mr : mi) ^ neg_imag;
 
             if (likely((pg >> (i & 63)) & 1)) {
-                d = *(float16 *)(va + H1_2(i));
+                d = *(float16 *)((char *)va + H1_2(i));
                 d = float16_muladd(e2, e1, d, 0, &env->vfp.fp_status_f16);
-                *(float16 *)(vd + H1_2(i)) = d;
+                *(float16 *)((char *)vd + H1_2(i)) = d;
             }
             if (likely((pg >> (j & 63)) & 1)) {
-                d = *(float16 *)(va + H1_2(j));
+                d = *(float16 *)((char *)va + H1_2(j));
                 d = float16_muladd(e4, e3, d, 0, &env->vfp.fp_status_f16);
-                *(float16 *)(vd + H1_2(j)) = d;
+                *(float16 *)((char *)vd + H1_2(j)) = d;
             }
         } while (i & 63);
     } while (i != 0);
@@ -3891,10 +3943,10 @@ void HELPER(sve_fcmla_zpzzz_s)(CPUARMState *env, void *vg, uint32_t desc)
             j = i - sizeof(float32);
             i -= 2 * sizeof(float32);
 
-            nr = *(float32 *)(vn + H1_2(i));
-            ni = *(float32 *)(vn + H1_2(j));
-            mr = *(float32 *)(vm + H1_2(i));
-            mi = *(float32 *)(vm + H1_2(j));
+            nr = *(float32 *)((char *)vn + H1_2(i));
+            ni = *(float32 *)((char *)vn + H1_2(j));
+            mr = *(float32 *)((char *)vm + H1_2(i));
+            mi = *(float32 *)((char *)vm + H1_2(j));
 
             e2 = (flip ? ni : nr);
             e1 = (flip ? mi : mr) ^ neg_real;
@@ -3902,14 +3954,14 @@ void HELPER(sve_fcmla_zpzzz_s)(CPUARMState *env, void *vg, uint32_t desc)
             e3 = (flip ? mr : mi) ^ neg_imag;
 
             if (likely((pg >> (i & 63)) & 1)) {
-                d = *(float32 *)(va + H1_2(i));
+                d = *(float32 *)((char *)va + H1_2(i));
                 d = float32_muladd(e2, e1, d, 0, &env->vfp.fp_status);
-                *(float32 *)(vd + H1_2(i)) = d;
+                *(float32 *)((char *)vd + H1_2(i)) = d;
             }
             if (likely((pg >> (j & 63)) & 1)) {
-                d = *(float32 *)(va + H1_2(j));
+                d = *(float32 *)((char *)va + H1_2(j));
                 d = float32_muladd(e4, e3, d, 0, &env->vfp.fp_status);
-                *(float32 *)(vd + H1_2(j)) = d;
+                *(float32 *)((char *)vd + H1_2(j)) = d;
             }
         } while (i & 63);
     } while (i != 0);
@@ -3943,10 +3995,10 @@ void HELPER(sve_fcmla_zpzzz_d)(CPUARMState *env, void *vg, uint32_t desc)
             j = i - sizeof(float64);
             i -= 2 * sizeof(float64);
 
-            nr = *(float64 *)(vn + H1_2(i));
-            ni = *(float64 *)(vn + H1_2(j));
-            mr = *(float64 *)(vm + H1_2(i));
-            mi = *(float64 *)(vm + H1_2(j));
+            nr = *(float64 *)((char *)vn + H1_2(i));
+            ni = *(float64 *)((char *)vn + H1_2(j));
+            mr = *(float64 *)((char *)vm + H1_2(i));
+            mi = *(float64 *)((char *)vm + H1_2(j));
 
             e2 = (flip ? ni : nr);
             e1 = (flip ? mi : mr) ^ neg_real;
@@ -3954,14 +4006,14 @@ void HELPER(sve_fcmla_zpzzz_d)(CPUARMState *env, void *vg, uint32_t desc)
             e3 = (flip ? mr : mi) ^ neg_imag;
 
             if (likely((pg >> (i & 63)) & 1)) {
-                d = *(float64 *)(va + H1_2(i));
+                d = *(float64 *)((char *)va + H1_2(i));
                 d = float64_muladd(e2, e1, d, 0, &env->vfp.fp_status);
-                *(float64 *)(vd + H1_2(i)) = d;
+                *(float64 *)((char *)vd + H1_2(i)) = d;
             }
             if (likely((pg >> (j & 63)) & 1)) {
-                d = *(float64 *)(va + H1_2(j));
+                d = *(float64 *)((char *)va + H1_2(j));
                 d = float64_muladd(e4, e3, d, 0, &env->vfp.fp_status);
-                *(float64 *)(vd + H1_2(j)) = d;
+                *(float64 *)((char *)vd + H1_2(j)) = d;
             }
         } while (i & 63);
     } while (i != 0);
@@ -4008,31 +4060,21 @@ static intptr_t sve_##NAME##_host(void *vd, void *vg, void *host,           \
     while (mem_off + sizeof(TYPEM) <= mem_max) {                            \
         TYPEM val = 0;                                                      \
         if (likely((pg[reg_off >> 6] >> (reg_off & 63)) & 1)) {             \
-            val = HOST(host + mem_off);                                     \
+            val = HOST((char *)host + mem_off);                                     \
         }                                                                   \
-        *(TYPEE *)(vd + H(reg_off)) = val;                                  \
+        *(TYPEE *)((char *)vd + H(reg_off)) = val;                                  \
         mem_off += sizeof(TYPEM), reg_off += sizeof(TYPEE);                 \
     }                                                                       \
     return mem_off;                                                         \
 }
 
-#ifdef CONFIG_SOFTMMU
 #define DO_LD_TLB(NAME, H, TYPEE, TYPEM, HOST, MOEND, TLB) \
 static void sve_##NAME##_tlb(CPUARMState *env, void *vd, intptr_t reg_off,  \
                              target_ulong addr, TCGMemOpIdx oi, uintptr_t ra)  \
 {                                                                           \
     TYPEM val = TLB(env, addr, oi, ra);                                     \
-    *(TYPEE *)(vd + H(reg_off)) = val;                                      \
+    *(TYPEE *)((char *)vd + H(reg_off)) = val;                                      \
 }
-#else
-#define DO_LD_TLB(NAME, H, TYPEE, TYPEM, HOST, MOEND, TLB)                  \
-static void sve_##NAME##_tlb(CPUARMState *env, void *vd, intptr_t reg_off,  \
-                             target_ulong addr, TCGMemOpIdx oi, uintptr_t ra)  \
-{                                                                           \
-    TYPEM val = HOST(g2h(addr));                                            \
-    *(TYPEE *)(vd + H(reg_off)) = val;                                      \
-}
-#endif
 
 #define DO_LD_PRIM_1(NAME, H, TE, TM)                   \
     DO_LD_HOST(NAME, H, TE, TM, ldub_p)                 \
@@ -4118,7 +4160,7 @@ static intptr_t find_next_active(uint64_t *vg, intptr_t reg_off,
  * Return the maximum offset <= @mem_max which is still within the page
  * referenced by @base + @mem_off.
  */
-static intptr_t max_for_page(target_ulong base, intptr_t mem_off,
+static intptr_t max_for_page(struct uc_struct *uc, target_ulong base, intptr_t mem_off,
                              intptr_t mem_max)
 {
     target_ulong addr = base + mem_off;
@@ -4126,11 +4168,9 @@ static intptr_t max_for_page(target_ulong base, intptr_t mem_off,
     return MIN(split, mem_max - mem_off) + mem_off;
 }
 
-#ifndef CONFIG_USER_ONLY
 /* These are normally defined only for CONFIG_USER_ONLY in <exec/cpu_ldst.h> */
 static inline void set_helper_retaddr(uintptr_t ra) { }
 static inline void clear_helper_retaddr(void) { }
-#endif
 
 /*
  * The result of tlb_vaddr_to_host for user-only is just g2h(x),
@@ -4138,11 +4178,7 @@ static inline void clear_helper_retaddr(void) { }
  */
 static inline bool test_host_page(void *host)
 {
-#ifdef CONFIG_USER_ONLY
-    return true;
-#else
     return likely(host != NULL);
-#endif
 }
 
 /*
@@ -4182,11 +4218,11 @@ static void sve_ld1_r(CPUARMState *env, void *vg, const target_ulong addr,
      * We can thus perform the load directly to the destination and
      * Vd will be unmodified on any exception path.
      */
-    split = max_for_page(addr, mem_off, mem_max);
+    split = max_for_page(env->uc, addr, mem_off, mem_max);
     if (likely(split == mem_max)) {
         host = tlb_vaddr_to_host(env, addr + mem_off, MMU_DATA_LOAD, mmu_idx);
         if (test_host_page(host)) {
-            mem_off = host_fn(vd, vg, host - mem_off, mem_off, mem_max);
+            mem_off = host_fn(vd, vg, (char *)host - mem_off, mem_off, mem_max);
             tcg_debug_assert(mem_off == mem_max);
             clear_helper_retaddr();
             /* After having taken any fault, zero leading inactive elements. */
@@ -4199,10 +4235,6 @@ static void sve_ld1_r(CPUARMState *env, void *vg, const target_ulong addr,
      * Perform the predicated read into a temporary, thus ensuring
      * if the load of the last element faults, Vd is not modified.
      */
-#ifdef CONFIG_USER_ONLY
-    swap_memzero(&scratch, reg_off);
-    host_fn(&scratch, vg, g2h(addr), mem_off, mem_max);
-#else
     memset(&scratch, 0, reg_max);
     goto start;
     while (1) {
@@ -4211,15 +4243,15 @@ static void sve_ld1_r(CPUARMState *env, void *vg, const target_ulong addr,
             break;
         }
         mem_off = reg_off >> diffsz;
-        split = max_for_page(addr, mem_off, mem_max);
+        split = max_for_page(env->uc, addr, mem_off, mem_max);
 
     start:
-        if (split - mem_off >= (1 << msz)) {
+        if (split - mem_off >= (1ULL << msz)) {
             /* At least one whole element on this page.  */
             host = tlb_vaddr_to_host(env, addr + mem_off,
                                      MMU_DATA_LOAD, mmu_idx);
             if (host) {
-                mem_off = host_fn(&scratch, vg, host - mem_off,
+                mem_off = host_fn(&scratch, vg, (char *)host - mem_off,
                                   mem_off, split);
                 reg_off = mem_off << diffsz;
                 continue;
@@ -4235,9 +4267,8 @@ static void sve_ld1_r(CPUARMState *env, void *vg, const target_ulong addr,
          * But even then we have still made forward progress.
          */
         tlb_fn(env, &scratch, reg_off, addr + mem_off, oi, retaddr);
-        reg_off += 1 << esz;
+        reg_off += 1ULL << esz;
     }
-#endif
 
     clear_helper_retaddr();
     memcpy(vd, &scratch, reg_max);
@@ -4298,11 +4329,11 @@ static void sve_ld2_r(CPUARMState *env, void *vg, target_ulong addr,
     const TCGMemOpIdx oi = extract32(desc, SIMD_DATA_SHIFT, MEMOPIDX_SHIFT);
     const unsigned rd = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 5);
     intptr_t i, oprsz = simd_oprsz(desc);
-    ARMVectorReg scratch[2] = { };
+    ARMVectorReg scratch[2] = { 0 };
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
                 tlb_fn(env, &scratch[0], i, addr, oi, ra);
@@ -4326,11 +4357,11 @@ static void sve_ld3_r(CPUARMState *env, void *vg, target_ulong addr,
     const TCGMemOpIdx oi = extract32(desc, SIMD_DATA_SHIFT, MEMOPIDX_SHIFT);
     const unsigned rd = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 5);
     intptr_t i, oprsz = simd_oprsz(desc);
-    ARMVectorReg scratch[3] = { };
+    ARMVectorReg scratch[3] = { 0 };
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
                 tlb_fn(env, &scratch[0], i, addr, oi, ra);
@@ -4356,11 +4387,11 @@ static void sve_ld4_r(CPUARMState *env, void *vg, target_ulong addr,
     const TCGMemOpIdx oi = extract32(desc, SIMD_DATA_SHIFT, MEMOPIDX_SHIFT);
     const unsigned rd = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 5);
     intptr_t i, oprsz = simd_oprsz(desc);
-    ARMVectorReg scratch[4] = { };
+    ARMVectorReg scratch[4] = { 0 };
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
                 tlb_fn(env, &scratch[0], i, addr, oi, ra);
@@ -4488,11 +4519,11 @@ static void sve_ldff1_r(CPUARMState *env, void *vg, const target_ulong addr,
      * We can thus perform the load directly to the destination and
      * Vd will be unmodified on any exception path.
      */
-    split = max_for_page(addr, mem_off, mem_max);
+    split = max_for_page(env->uc, addr, mem_off, mem_max);
     if (likely(split == mem_max)) {
         host = tlb_vaddr_to_host(env, addr + mem_off, MMU_DATA_LOAD, mmu_idx);
         if (test_host_page(host)) {
-            mem_off = host_fn(vd, vg, host - mem_off, mem_off, mem_max);
+            mem_off = host_fn(vd, vg, (char *)host - mem_off, mem_off, mem_max);
             tcg_debug_assert(mem_off == mem_max);
             clear_helper_retaddr();
             /* After any fault, zero any leading inactive elements.  */
@@ -4501,20 +4532,6 @@ static void sve_ldff1_r(CPUARMState *env, void *vg, const target_ulong addr,
         }
     }
 
-#ifdef CONFIG_USER_ONLY
-    /*
-     * The page(s) containing this first element at ADDR+MEM_OFF must
-     * be valid.  Considering that this first element may be misaligned
-     * and cross a page boundary itself, take the rest of the page from
-     * the last byte of the element.
-     */
-    split = max_for_page(addr, mem_off + (1 << msz) - 1, mem_max);
-    mem_off = host_fn(vd, vg, g2h(addr), mem_off, split);
-
-    /* After any fault, zero any leading inactive elements.  */
-    swap_memzero(vd, reg_off);
-    reg_off = mem_off << diffsz;
-#else
     /*
      * Perform one normal read, which will fault or not.
      * But it is likely to bring the page into the tlb.
@@ -4523,19 +4540,18 @@ static void sve_ldff1_r(CPUARMState *env, void *vg, const target_ulong addr,
 
     /* After any fault, zero any leading predicated false elts.  */
     swap_memzero(vd, reg_off);
-    mem_off += 1 << msz;
-    reg_off += 1 << esz;
+    mem_off += 1ULL << msz;
+    reg_off += 1ULL << esz;
 
     /* Try again to read the balance of the page.  */
-    split = max_for_page(addr, mem_off - 1, mem_max);
-    if (split >= (1 << msz)) {
+    split = max_for_page(env->uc, addr, mem_off - 1, mem_max);
+    if (split >= (1ULL << msz)) {
         host = tlb_vaddr_to_host(env, addr + mem_off, MMU_DATA_LOAD, mmu_idx);
         if (host) {
-            mem_off = host_fn(vd, vg, host - mem_off, mem_off, split);
+            mem_off = host_fn(vd, vg, (char *)host - mem_off, mem_off, split);
             reg_off = mem_off << diffsz;
         }
     }
-#endif
 
     clear_helper_retaddr();
     record_fault(env, reg_off, reg_max);
@@ -4557,15 +4573,6 @@ static void sve_ldnf1_r(CPUARMState *env, void *vg, const target_ulong addr,
     intptr_t split, reg_off, mem_off;
     void *host;
 
-#ifdef CONFIG_USER_ONLY
-    host = tlb_vaddr_to_host(env, addr, MMU_DATA_LOAD, mmu_idx);
-    if (likely(page_check_range(addr, mem_max, PAGE_READ) == 0)) {
-        /* The entire operation is valid and will not fault.  */
-        host_fn(vd, vg, host, 0, mem_max);
-        return;
-    }
-#endif
-
     /* There will be no fault, so we may modify in advance.  */
     memset(vd, 0, reg_max);
 
@@ -4577,14 +4584,6 @@ static void sve_ldnf1_r(CPUARMState *env, void *vg, const target_ulong addr,
     }
     mem_off = reg_off >> diffsz;
 
-#ifdef CONFIG_USER_ONLY
-    if (page_check_range(addr + mem_off, 1 << msz, PAGE_READ) == 0) {
-        /* At least one load is valid; take the rest of the page.  */
-        split = max_for_page(addr, mem_off + (1 << msz) - 1, mem_max);
-        mem_off = host_fn(vd, vg, host, mem_off, split);
-        reg_off = mem_off << diffsz;
-    }
-#else
     /*
      * If the address is not in the TLB, we have no way to bring the
      * entry into the TLB without also risking a fault.  Note that
@@ -4601,12 +4600,11 @@ static void sve_ldnf1_r(CPUARMState *env, void *vg, const target_ulong addr,
      * TODO: Add a form of non-faulting loads using cc->tlb_fill(probe=true).
      */
     host = tlb_vaddr_to_host(env, addr + mem_off, MMU_DATA_LOAD, mmu_idx);
-    split = max_for_page(addr, mem_off, mem_max);
-    if (host && split >= (1 << msz)) {
-        mem_off = host_fn(vd, vg, host - mem_off, mem_off, split);
+    split = max_for_page(env->uc, addr, mem_off, mem_max);
+    if (host && split >= (1ULL << msz)) {
+        mem_off = host_fn(vd, vg, (char *)host - mem_off, mem_off, split);
         reg_off = mem_off << diffsz;
     }
-#endif
 
     record_fault(env, reg_off, reg_max);
 }
@@ -4675,21 +4673,12 @@ DO_LDFF1_LDNF1_2(dd,  3, 3)
  * Store contiguous data, protected by a governing predicate.
  */
 
-#ifdef CONFIG_SOFTMMU
 #define DO_ST_TLB(NAME, H, TYPEM, HOST, MOEND, TLB) \
 static void sve_##NAME##_tlb(CPUARMState *env, void *vd, intptr_t reg_off,  \
                              target_ulong addr, TCGMemOpIdx oi, uintptr_t ra) \
 {                                                                           \
-    TLB(env, addr, *(TYPEM *)(vd + H(reg_off)), oi, ra);                    \
+    TLB(env, addr, *(TYPEM *)((char *)vd + H(reg_off)), oi, ra);                    \
 }
-#else
-#define DO_ST_TLB(NAME, H, TYPEM, HOST, MOEND, TLB) \
-static void sve_##NAME##_tlb(CPUARMState *env, void *vd, intptr_t reg_off,  \
-                             target_ulong addr, TCGMemOpIdx oi, uintptr_t ra) \
-{                                                                           \
-    HOST(g2h(addr), *(TYPEM *)(vd + H(reg_off)));                           \
-}
-#endif
 
 DO_ST_TLB(st1bb,   H1,  uint8_t, stb_p, 0, helper_ret_stb_mmu)
 DO_ST_TLB(st1bh, H1_2, uint16_t, stb_p, 0, helper_ret_stb_mmu)
@@ -4731,7 +4720,7 @@ static void sve_st1_r(CPUARMState *env, void *vg, target_ulong addr,
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
                 tlb_fn(env, vd, i, addr, oi, ra);
@@ -4756,7 +4745,7 @@ static void sve_st2_r(CPUARMState *env, void *vg, target_ulong addr,
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
                 tlb_fn(env, d1, i, addr, oi, ra);
@@ -4783,7 +4772,7 @@ static void sve_st3_r(CPUARMState *env, void *vg, target_ulong addr,
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
                 tlb_fn(env, d1, i, addr, oi, ra);
@@ -4812,7 +4801,7 @@ static void sve_st4_r(CPUARMState *env, void *vg, target_ulong addr,
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (pg & 1) {
                 tlb_fn(env, d1, i, addr, oi, ra);
@@ -4889,27 +4878,27 @@ typedef target_ulong zreg_off_fn(void *reg, intptr_t reg_ofs);
 
 static target_ulong off_zsu_s(void *reg, intptr_t reg_ofs)
 {
-    return *(uint32_t *)(reg + H1_4(reg_ofs));
+    return *(uint32_t *)((char *)reg + H1_4(reg_ofs));
 }
 
 static target_ulong off_zss_s(void *reg, intptr_t reg_ofs)
 {
-    return *(int32_t *)(reg + H1_4(reg_ofs));
+    return *(int32_t *)((char *)reg + H1_4(reg_ofs));
 }
 
 static target_ulong off_zsu_d(void *reg, intptr_t reg_ofs)
 {
-    return (uint32_t)*(uint64_t *)(reg + reg_ofs);
+    return (uint32_t)*(uint64_t *)((char *)reg + reg_ofs);
 }
 
 static target_ulong off_zss_d(void *reg, intptr_t reg_ofs)
 {
-    return (int32_t)*(uint64_t *)(reg + reg_ofs);
+    return (int32_t)*(uint64_t *)((char *)reg + reg_ofs);
 }
 
 static target_ulong off_zd_d(void *reg, intptr_t reg_ofs)
 {
-    return *(uint64_t *)(reg + reg_ofs);
+    return *(uint64_t *)((char *)reg + reg_ofs);
 }
 
 static void sve_ld1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
@@ -4919,11 +4908,11 @@ static void sve_ld1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
     const TCGMemOpIdx oi = extract32(desc, SIMD_DATA_SHIFT, MEMOPIDX_SHIFT);
     const int scale = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 2);
     intptr_t i, oprsz = simd_oprsz(desc);
-    ARMVectorReg scratch = { };
+    ARMVectorReg scratch = { 0 };
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (likely(pg & 1)) {
                 target_ulong off = off_fn(vm, i);
@@ -4945,11 +4934,11 @@ static void sve_ld1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
     const TCGMemOpIdx oi = extract32(desc, SIMD_DATA_SHIFT, MEMOPIDX_SHIFT);
     const int scale = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 2);
     intptr_t i, oprsz = simd_oprsz(desc) / 8;
-    ARMVectorReg scratch = { };
+    ARMVectorReg scratch = { 0 };
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; i++) {
-        uint8_t pg = *(uint8_t *)(vg + H1(i));
+        uint8_t pg = *(uint8_t *)((char *)vg + H1(i));
         if (likely(pg & 1)) {
             target_ulong off = off_fn(vm, i * 8);
             tlb_fn(env, &scratch, i * 8, base + (off << scale), oi, ra);
@@ -5055,17 +5044,18 @@ DO_LD1_ZPZ_D(dd_be, zd)
 typedef bool sve_ld1_nf_fn(CPUARMState *env, void *vd, intptr_t reg_off,
                            target_ulong vaddr, int mmu_idx);
 
-#ifdef CONFIG_SOFTMMU
+#ifdef _MSC_VER
 #define DO_LD_NF(NAME, H, TYPEE, TYPEM, HOST) \
 static bool sve_ld##NAME##_nf(CPUARMState *env, void *vd, intptr_t reg_off, \
                               target_ulong addr, int mmu_idx)               \
 {                                                                           \
-    target_ulong next_page = -(addr | TARGET_PAGE_MASK);                    \
+    struct uc_struct *uc = env->uc;                                         \
+    target_ulong next_page = 0ULL - (addr | TARGET_PAGE_MASK);                    \
     if (likely(next_page - addr >= sizeof(TYPEM))) {                        \
         void *host = tlb_vaddr_to_host(env, addr, MMU_DATA_LOAD, mmu_idx);  \
         if (likely(host)) {                                                 \
             TYPEM val = HOST(host);                                         \
-            *(TYPEE *)(vd + H(reg_off)) = val;                              \
+            *(TYPEE *)((char *)vd + H(reg_off)) = val;                              \
             return true;                                                    \
         }                                                                   \
     }                                                                       \
@@ -5074,12 +5064,17 @@ static bool sve_ld##NAME##_nf(CPUARMState *env, void *vd, intptr_t reg_off, \
 #else
 #define DO_LD_NF(NAME, H, TYPEE, TYPEM, HOST) \
 static bool sve_ld##NAME##_nf(CPUARMState *env, void *vd, intptr_t reg_off, \
-                            target_ulong addr, int mmu_idx)                 \
+                              target_ulong addr, int mmu_idx)               \
 {                                                                           \
-    if (likely(page_check_range(addr, sizeof(TYPEM), PAGE_READ))) {         \
-        TYPEM val = HOST(g2h(addr));                                        \
-        *(TYPEE *)(vd + H(reg_off)) = val;                                  \
-        return true;                                                        \
+    struct uc_struct *uc = env->uc;                                         \
+    target_ulong next_page = -(addr | TARGET_PAGE_MASK);                    \
+    if (likely(next_page - addr >= sizeof(TYPEM))) {                        \
+        void *host = tlb_vaddr_to_host(env, addr, MMU_DATA_LOAD, mmu_idx);  \
+        if (likely(host)) {                                                 \
+            TYPEM val = HOST(host);                                         \
+            *(TYPEE *)((char *)vd + H(reg_off)) = val;                              \
+            return true;                                                    \
+        }                                                                   \
     }                                                                       \
     return false;                                                           \
 }
@@ -5140,7 +5135,7 @@ static inline void sve_ldff1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
     swap_memzero(vd, reg_off);
 
     while (likely((reg_off += 4) < reg_max)) {
-        uint64_t pg = *(uint64_t *)(vg + (reg_off >> 6) * 8);
+        uint64_t pg = *(uint64_t *)((char *)vg + (reg_off >> 6) * 8);
         if (likely((pg >> (reg_off & 63)) & 1)) {
             addr = off_fn(vm, reg_off);
             addr = base + (addr << scale);
@@ -5149,7 +5144,7 @@ static inline void sve_ldff1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
                 break;
             }
         } else {
-            *(uint32_t *)(vd + H1_4(reg_off)) = 0;
+            *(uint32_t *)((char *)vd + H1_4(reg_off)) = 0;
         }
     }
 }
@@ -5182,7 +5177,7 @@ static inline void sve_ldff1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
     swap_memzero(vd, reg_off);
 
     while (likely((reg_off += 8) < reg_max)) {
-        uint8_t pg = *(uint8_t *)(vg + H1(reg_off >> 3));
+        uint8_t pg = *(uint8_t *)((char *)vg + H1(reg_off >> 3));
         if (likely(pg & 1)) {
             addr = off_fn(vm, reg_off);
             addr = base + (addr << scale);
@@ -5191,7 +5186,7 @@ static inline void sve_ldff1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
                 break;
             }
         } else {
-            *(uint64_t *)(vd + reg_off) = 0;
+            *(uint64_t *)((char *)vd + reg_off) = 0;
         }
     }
 }
@@ -5290,7 +5285,7 @@ static void sve_st1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
-        uint16_t pg = *(uint16_t *)(vg + H1_2(i >> 3));
+        uint16_t pg = *(uint16_t *)((char *)vg + H1_2(i >> 3));
         do {
             if (likely(pg & 1)) {
                 target_ulong off = off_fn(vm, i);
@@ -5312,7 +5307,7 @@ static void sve_st1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; i++) {
-        uint8_t pg = *(uint8_t *)(vg + H1(i));
+        uint8_t pg = *(uint8_t *)((char *)vg + H1(i));
         if (likely(pg & 1)) {
             target_ulong off = off_fn(vm, i * 8);
             tlb_fn(env, vd, i * 8, base + (off << scale), oi, ra);

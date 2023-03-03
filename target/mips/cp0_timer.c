@@ -21,10 +21,10 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/irq.h"
-#include "hw/mips/cpudevs.h"
+//#include "hw/irq.h"
+//#include "hw/mips/cpudevs.h"
 #include "qemu/timer.h"
-#include "sysemu/kvm.h"
+//#include "sysemu/kvm.h"
 #include "internal.h"
 
 #define TIMER_PERIOD 10 /* 10 ns period for 100 Mhz frequency */
@@ -54,6 +54,7 @@ uint32_t cpu_mips_get_random(CPUMIPSState *env)
     return idx;
 }
 
+#if 0
 /* MIPS R4K timer */
 static void cpu_mips_timer_update(CPUMIPSState *env)
 {
@@ -168,3 +169,4 @@ void cpu_mips_clock_init(MIPSCPU *cpu)
         env->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &mips_timer_cb, env);
     }
 }
+#endif

@@ -1,3 +1,7 @@
+DEF_HELPER_4(uc_tracecode, void, i32, i32, ptr, i64)
+DEF_HELPER_6(uc_traceopcode, void, ptr, i64, i64, i32, ptr, i64)
+DEF_HELPER_1(uc_riscv_exit, void, env)
+
 /* Exceptions */
 DEF_HELPER_2(raise_exception, noreturn, env, i32)
 
@@ -70,9 +74,7 @@ DEF_HELPER_FLAGS_1(fclass_d, TCG_CALL_NO_RWG_SE, tl, i64)
 DEF_HELPER_3(csrrw, tl, env, tl, tl)
 DEF_HELPER_4(csrrs, tl, env, tl, tl, tl)
 DEF_HELPER_4(csrrc, tl, env, tl, tl, tl)
-#ifndef CONFIG_USER_ONLY
 DEF_HELPER_2(sret, tl, env, tl)
 DEF_HELPER_2(mret, tl, env, tl)
 DEF_HELPER_1(wfi, void, env)
 DEF_HELPER_1(tlb_flush, void, env)
-#endif

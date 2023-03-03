@@ -22,18 +22,9 @@
 
 #include "hw/core/cpu.h"
 
-#ifdef TARGET_SPARC64
-#define TYPE_SPARC_CPU "sparc64-cpu"
-#else
-#define TYPE_SPARC_CPU "sparc-cpu"
-#endif
-
-#define SPARC_CPU_CLASS(klass) \
-    OBJECT_CLASS_CHECK(SPARCCPUClass, (klass), TYPE_SPARC_CPU)
-#define SPARC_CPU(obj) \
-    OBJECT_CHECK(SPARCCPU, (obj), TYPE_SPARC_CPU)
-#define SPARC_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(SPARCCPUClass, (obj), TYPE_SPARC_CPU)
+#define SPARC_CPU(obj) ((SPARCCPU *)obj)
+#define SPARC_CPU_CLASS(klass) ((SPARCCPUClass *)klass)
+#define SPARC_CPU_GET_CLASS(obj) (&((SPARCCPU *)obj)->cc)
 
 typedef struct sparc_def_t sparc_def_t;
 /**
@@ -48,9 +39,8 @@ typedef struct SPARCCPUClass {
     CPUClass parent_class;
     /*< public >*/
 
-    DeviceRealize parent_realize;
-    DeviceReset parent_reset;
-    sparc_def_t *cpu_def;
+    void (*parent_reset)(CPUState *cpu);
+    const sparc_def_t *cpu_def;
 } SPARCCPUClass;
 
 typedef struct SPARCCPU SPARCCPU;

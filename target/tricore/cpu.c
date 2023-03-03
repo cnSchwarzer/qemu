@@ -17,19 +17,17 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "qemu/osdep.h"
-#include "qapi/error.h"
-#include "cpu.h"
-#include "exec/exec-all.h"
-#include "qemu/error-report.h"
+/*
+   Modified for Unicorn Engine by Eric Poole <eric.poole@aptiv.com>, 2022
+   Copyright 2022 Aptiv 
+*/
 
-static hwaddr tricore_cpu_get_phys_page_attrs_debug(CPUState *cpu, vaddr addr,
-                                         MemTxAttrs *attrs)
-{
-    error_report("function cpu_get_phys_page_attrs_debug not "
-                    "implemented, aborting");
-    return -1;
-}
+#include "qemu/osdep.h"
+#include "cpu.h"
+#include "cpu-qom.h"
+#include "exec/exec-all.h"
+
+#include <uc_priv.h>
 
 static inline void set_feature(CPUTriCoreState *env, int feature)
 {
@@ -44,8 +42,7 @@ static void tricore_cpu_set_pc(CPUState *cs, vaddr value)
     env->PC = value & ~(target_ulong)1;
 }
 
-static void tricore_cpu_synchronize_from_tb(CPUState *cs,
-                                            TranslationBlock *tb)
+static void tricore_cpu_synchronize_from_tb(CPUState *cs, TranslationBlock *tb)
 {
     TriCoreCPU *cpu = TRICORE_CPU(cs);
     CPUTriCoreState *env = &cpu->env;
@@ -53,7 +50,7 @@ static void tricore_cpu_synchronize_from_tb(CPUState *cs,
     env->PC = tb->pc;
 }
 
-static void tricore_cpu_reset(DeviceState *dev)
+static void tricore_cpu_reset(CPUState *dev)
 {
     CPUState *s = CPU(dev);
     TriCoreCPU *cpu = TRICORE_CPU(s);
@@ -61,6 +58,8 @@ static void tricore_cpu_reset(DeviceState *dev)
     CPUTriCoreState *env = &cpu->env;
 
     tcc->parent_reset(dev);
+
+    memset(env, 0, offsetof(CPUTriCoreState, end_reset_fields));
 
     cpu_state_reset(env);
 }
@@ -70,19 +69,13 @@ static bool tricore_cpu_has_work(CPUState *cs)
     return true;
 }
 
-static void tricore_cpu_realizefn(DeviceState *dev, Error **errp)
+static void tricore_cpu_realizefn(CPUState *dev)
 {
     CPUState *cs = CPU(dev);
     TriCoreCPU *cpu = TRICORE_CPU(dev);
-    TriCoreCPUClass *tcc = TRICORE_CPU_GET_CLASS(dev);
     CPUTriCoreState *env = &cpu->env;
-    Error *local_err = NULL;
 
-    cpu_exec_realizefn(cs, &local_err);
-    if (local_err != NULL) {
-        error_propagate(errp, local_err);
-        return;
-    }
+    cpu_exec_realizefn(cs);
 
     /* Some features automatically imply others */
     if (tricore_feature(env, TRICORE_FEATURE_161)) {
@@ -96,96 +89,117 @@ static void tricore_cpu_realizefn(DeviceState *dev, Error **errp)
         set_feature(env, TRICORE_FEATURE_13);
     }
     cpu_reset(cs);
-    qemu_init_vcpu(cs);
-
-    tcc->parent_realize(dev, errp);
 }
 
 
-static void tricore_cpu_initfn(Object *obj)
+static void tricore_cpu_initfn(struct uc_struct *uc, CPUState *obj)
 {
     TriCoreCPU *cpu = TRICORE_CPU(obj);
+    CPUTriCoreState *env = &cpu->env;
 
+    env->uc = uc;
     cpu_set_cpustate_pointers(cpu);
 }
 
-static ObjectClass *tricore_cpu_class_by_name(const char *cpu_model)
-{
-    ObjectClass *oc;
-    char *typename;
-
-    typename = g_strdup_printf(TRICORE_CPU_TYPE_NAME("%s"), cpu_model);
-    oc = object_class_by_name(typename);
-    g_free(typename);
-    if (!oc || !object_class_dynamic_cast(oc, TYPE_TRICORE_CPU) ||
-        object_class_is_abstract(oc)) {
-        return NULL;
-    }
-    return oc;
-}
-
-static void tc1796_initfn(Object *obj)
+static void tc1796_initfn(CPUState *obj)
 {
     TriCoreCPU *cpu = TRICORE_CPU(obj);
 
     set_feature(&cpu->env, TRICORE_FEATURE_13);
 }
 
-static void tc1797_initfn(Object *obj)
+static void tc1797_initfn(CPUState *obj)
 {
     TriCoreCPU *cpu = TRICORE_CPU(obj);
 
     set_feature(&cpu->env, TRICORE_FEATURE_131);
 }
 
-static void tc27x_initfn(Object *obj)
+static void tc27x_initfn(CPUState *obj)
 {
     TriCoreCPU *cpu = TRICORE_CPU(obj);
 
     set_feature(&cpu->env, TRICORE_FEATURE_161);
 }
 
-static void tricore_cpu_class_init(ObjectClass *c, void *data)
+static void tricore_cpu_class_init(CPUClass *c)
 {
     TriCoreCPUClass *mcc = TRICORE_CPU_CLASS(c);
     CPUClass *cc = CPU_CLASS(c);
-    DeviceClass *dc = DEVICE_CLASS(c);
 
-    device_class_set_parent_realize(dc, tricore_cpu_realizefn,
-                                    &mcc->parent_realize);
+    /* parent class is CPUClass, parent_reset() is cpu_common_reset(). */
+    mcc->parent_reset = cc->reset;
 
-    device_class_set_parent_reset(dc, tricore_cpu_reset, &mcc->parent_reset);
-    cc->class_by_name = tricore_cpu_class_by_name;
+    cc->reset = tricore_cpu_reset;
     cc->has_work = tricore_cpu_has_work;
-
-    cc->dump_state = tricore_cpu_dump_state;
     cc->set_pc = tricore_cpu_set_pc;
+
     cc->synchronize_from_tb = tricore_cpu_synchronize_from_tb;
-    cc->get_phys_page_attrs_debug = tricore_cpu_get_phys_page_attrs_debug;
-    cc->tcg_initialize = tricore_tcg_init;
+    cc->get_phys_page_debug = tricore_cpu_get_phys_page_debug;
+
     cc->tlb_fill = tricore_cpu_tlb_fill;
+    cc->tcg_initialize = tricore_tcg_init;
 }
 
 #define DEFINE_TRICORE_CPU_TYPE(cpu_model, initfn) \
     {                                              \
         .parent = TYPE_TRICORE_CPU,                \
-        .instance_init = initfn,                   \
+        .initfn = initfn,                   \
         .name = TRICORE_CPU_TYPE_NAME(cpu_model),  \
     }
 
-static const TypeInfo tricore_cpu_type_infos[] = {
-    {
-        .name = TYPE_TRICORE_CPU,
-        .parent = TYPE_CPU,
-        .instance_size = sizeof(TriCoreCPU),
-        .instance_init = tricore_cpu_initfn,
-        .abstract = true,
-        .class_size = sizeof(TriCoreCPUClass),
-        .class_init = tricore_cpu_class_init,
-    },
-    DEFINE_TRICORE_CPU_TYPE("tc1796", tc1796_initfn),
-    DEFINE_TRICORE_CPU_TYPE("tc1797", tc1797_initfn),
-    DEFINE_TRICORE_CPU_TYPE("tc27x", tc27x_initfn),
+struct TriCoreCPUInfo {
+    const char *name;
+    void (*initfn)(CPUState *obj);
 };
 
-DEFINE_TYPES(tricore_cpu_type_infos)
+static struct TriCoreCPUInfo tricore_cpus_type_infos[] = {
+    { "tc1796", tc1796_initfn },
+    { "tc1797", tc1797_initfn },
+    { "tc27x", tc27x_initfn },
+};
+
+TriCoreCPU *cpu_tricore_init(struct uc_struct *uc)
+{
+    TriCoreCPU *cpu;
+    CPUState *cs;
+    CPUClass *cc;
+
+    cpu = calloc(1, sizeof(*cpu));
+    if (cpu == NULL) {
+        return NULL;
+    }
+
+    if (uc->cpu_model == INT_MAX) {
+        uc->cpu_model = 2; // tc27x
+    } else if (uc->cpu_model >= ARRAY_SIZE(tricore_cpus_type_infos)) {
+        free(cpu);
+        return NULL;
+    }
+
+    cs = (CPUState *)cpu;
+    cc = (CPUClass *)&cpu->cc;
+    cs->cc = cc;
+    cs->uc = uc;
+    uc->cpu = cs;
+
+    cpu_class_init(uc, cc);
+
+    tricore_cpu_class_init(cc);
+
+    cpu_common_initfn(uc, cs);
+
+    tricore_cpu_initfn(uc, cs);
+
+    tricore_cpus_type_infos[uc->cpu_model].initfn(cs);
+
+    tricore_cpu_realizefn(cs);
+
+    // init address space
+    cpu_address_space_init(cs, 0, cs->memory);
+
+    qemu_init_vcpu(cs);
+
+    return cpu;
+}
+

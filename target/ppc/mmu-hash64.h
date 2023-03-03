@@ -1,8 +1,6 @@
 #ifndef MMU_HASH64_H
 #define MMU_HASH64_H
 
-#ifndef CONFIG_USER_ONLY
-
 #ifdef TARGET_PPC64
 void dump_slb(PowerPCCPU *cpu);
 int ppc_store_slb(PowerPCCPU *cpu, target_ulong slot,
@@ -159,16 +157,5 @@ static inline bool ppc_hash64_has(PowerPCCPU *cpu, unsigned feature)
 {
     return !!(cpu->hash64_opts->flags & feature);
 }
-
-#endif /* CONFIG_USER_ONLY */
-
-#if defined(CONFIG_USER_ONLY) || !defined(TARGET_PPC64)
-static inline void ppc_hash64_init(PowerPCCPU *cpu)
-{
-}
-static inline void ppc_hash64_finalize(PowerPCCPU *cpu)
-{
-}
-#endif
 
 #endif /* MMU_HASH64_H */

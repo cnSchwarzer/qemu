@@ -227,9 +227,12 @@ GEN_INPUT_FLUSH3(float64_input_flush3, float64)
 # endif
 # define QEMU_NO_HARDFLOAT 1
 # define QEMU_SOFTFLOAT_ATTR QEMU_FLATTEN
-#else
+#elif !defined(_MSC_VER)
 # define QEMU_NO_HARDFLOAT 0
 # define QEMU_SOFTFLOAT_ATTR QEMU_FLATTEN __attribute__((noinline))
+#else // MSVC
+# define QEMU_NO_HARDFLOAT 0
+# define QEMU_SOFTFLOAT_ATTR
 #endif
 
 static inline bool can_use_fpu(const float_status *s)
@@ -473,6 +476,7 @@ static inline flag extractFloat64Sign(float64 a)
  * is a NaN so cls >= float_class_qnan is any NaN.
  */
 
+#ifndef _MSC_VER
 typedef enum __attribute__ ((__packed__)) {
     float_class_unclassified,
     float_class_zero,
@@ -481,19 +485,43 @@ typedef enum __attribute__ ((__packed__)) {
     float_class_qnan,  /* all NaNs from here */
     float_class_snan,
 } FloatClass;
+#else
+__pragma(pack(push, 1))
+typedef enum {
+    float_class_unclassified,
+    float_class_zero,
+    float_class_normal,
+    float_class_inf,
+    float_class_qnan,  /* all NaNs from here */
+    float_class_snan,
+} FloatClass;
+__pragma(pack(pop))
+#endif
 
 /* Simple helpers for checking if, or what kind of, NaN we have */
+#ifndef _MSC_VER
 static inline __attribute__((unused)) bool is_nan(FloatClass c)
+#else
+static inline bool is_nan(FloatClass c)
+#endif
 {
     return unlikely(c >= float_class_qnan);
 }
 
+#ifndef _MSC_VER
 static inline __attribute__((unused)) bool is_snan(FloatClass c)
+#else
+static inline bool is_snan(FloatClass c)
+#endif
 {
     return c == float_class_snan;
 }
 
+#ifndef _MSC_VER
 static inline __attribute__((unused)) bool is_qnan(FloatClass c)
+#else
+static inline bool is_qnan(FloatClass c)
+#endif
 {
     return c == float_class_qnan;
 }
@@ -684,9 +712,9 @@ static FloatParts round_canonical(FloatParts p, float_status *s,
     const uint64_t roundeven_mask = parm->roundeven_mask;
     const int exp_max = parm->exp_max;
     const int frac_shift = parm->frac_shift;
-    uint64_t frac, inc;
+    uint64_t frac, inc = 0;
     int exp, flags = 0;
-    bool overflow_norm;
+    bool overflow_norm = false;
 
     frac = p.frac;
     exp = p.exp;
@@ -720,6 +748,7 @@ static FloatParts round_canonical(FloatParts p, float_status *s,
             break;
         default:
             g_assert_not_reached();
+            break;
         }
 
         exp += parm->exp_bias;
@@ -812,6 +841,7 @@ static FloatParts round_canonical(FloatParts p, float_status *s,
 
     default:
         g_assert_not_reached();
+        break;
     }
 
     float_raise(flags, s);
@@ -878,6 +908,7 @@ static FloatParts return_nan(FloatParts a, float_status *s)
 
     default:
         g_assert_not_reached();
+        break;
     }
     return a;
 }
@@ -934,6 +965,7 @@ static FloatParts pick_nan_muladd(FloatParts a, FloatParts b, FloatParts c,
         return parts_default_nan(s);
     default:
         g_assert_not_reached();
+        break;
     }
 
     if (is_snan(a.cls)) {
@@ -1028,7 +1060,9 @@ static FloatParts addsub_floats(FloatParts a, FloatParts b, bool subtract,
             return b;
         }
     }
+
     g_assert_not_reached();
+    return a;
 }
 
 /*
@@ -1216,7 +1250,9 @@ static FloatParts mul_floats(FloatParts a, FloatParts b, float_status *s)
         b.sign = sign;
         return b;
     }
+
     g_assert_not_reached();
+    return a;
 }
 
 float16 QEMU_FLATTEN float16_mul(float16 a, float16 b, float_status *status)
@@ -1754,7 +1790,9 @@ static FloatParts div_floats(FloatParts a, FloatParts b, float_status *s)
         a.sign = sign;
         return a;
     }
+
     g_assert_not_reached();
+    return a;
 }
 
 float16 float16_div(float16 a, float16 b, float_status *status)
@@ -1988,7 +2026,7 @@ static FloatParts round_to_int(FloatParts a, int rmode,
             break;
         }
         if (a.exp < 0) {
-            bool one;
+            bool one = false;
             /* all fractional */
             s->float_exception_flags |= float_flag_inexact;
             switch (rmode) {
@@ -2012,6 +2050,7 @@ static FloatParts round_to_int(FloatParts a, int rmode,
                 break;
             default:
                 g_assert_not_reached();
+                break;
             }
 
             if (one) {
@@ -2025,7 +2064,7 @@ static FloatParts round_to_int(FloatParts a, int rmode,
             uint64_t frac_lsbm1 = frac_lsb >> 1;
             uint64_t rnd_even_mask = (frac_lsb - 1) | frac_lsb;
             uint64_t rnd_mask = rnd_even_mask >> 1;
-            uint64_t inc;
+            uint64_t inc = 0;
 
             switch (rmode) {
             case float_round_nearest_even:
@@ -2048,6 +2087,7 @@ static FloatParts round_to_int(FloatParts a, int rmode,
                 break;
             default:
                 g_assert_not_reached();
+                break;
             }
 
             if (a.frac & rnd_mask) {
@@ -2126,8 +2166,13 @@ static int64_t round_to_int_and_pack(FloatParts in, int rmode, int scale,
             r = UINT64_MAX;
         }
         if (p.sign) {
+#ifdef _MSC_VER
+            if (r <=  0ULL - (uint64_t)min) {
+                return (0ULL - r);
+#else
             if (r <= -(uint64_t) min) {
                 return -r;
+#endif
             } else {
                 s->float_exception_flags = orig_flags | float_flag_invalid;
                 return min;
@@ -2142,6 +2187,7 @@ static int64_t round_to_int_and_pack(FloatParts in, int rmode, int scale,
         }
     default:
         g_assert_not_reached();
+        return max;
     }
 }
 
@@ -2354,6 +2400,7 @@ static uint64_t round_to_uint_and_pack(FloatParts in, int rmode, int scale,
         return r;
     default:
         g_assert_not_reached();
+        return max;
     }
 }
 
@@ -2530,7 +2577,11 @@ static FloatParts int_to_float(int64_t a, int scale, float_status *status)
 
         r.cls = float_class_normal;
         if (a < 0) {
+#ifdef _MSC_VER
+            f = 0ULL - f;
+#else
             f = -f;
+#endif
             r.sign = true;
         }
         shift = clz64(f) - 1;
@@ -2797,7 +2848,7 @@ static FloatParts minmax_floats(FloatParts a, FloatParts b, bool ismin,
         }
         return pick_nan(a, b, s);
     } else {
-        int a_exp, b_exp;
+        int a_exp = 0, b_exp = 0;
 
         switch (a.cls) {
         case float_class_normal:
@@ -3266,7 +3317,11 @@ float128 float128_default_nan(float_status *status)
      * in the quad-floating format.  If the low bit is set, assume we
      * want to set all non-snan bits.
      */
+#ifdef _MSC_VER
+    r.low = 0ULL - (p.frac & 1);
+#else
     r.low = -(p.frac & 1);
+#endif
     r.high = p.frac >> (DECOMPOSED_BINARY_POINT - 48);
     r.high |= UINT64_C(0x7FFF000000000000);
     r.high |= (uint64_t)p.sign << 63;
@@ -4623,7 +4678,11 @@ float32 float32_rem(float32 a, float32 b, float_status *status)
         while ( 0 < expDiff ) {
             q64 = estimateDiv128To64( aSig64, 0, bSig64 );
             q64 = ( 2 < q64 ) ? q64 - 2 : 0;
+#ifdef _MSC_VER
+            aSig64 = 0ULL - ( ( bSig * q64 )<<38 );
+#else
             aSig64 = - ( ( bSig * q64 )<<38 );
+#endif
             expDiff -= 62;
         }
         expDiff += 64;
@@ -4643,7 +4702,11 @@ float32 float32_rem(float32 a, float32 b, float_status *status)
         aSig = alternateASig;
     }
     zSign = ( (int32_t) aSig < 0 );
+#ifdef _MSC_VER
+    if ( zSign ) aSig = 0ULL - aSig;
+#else
     if ( zSign ) aSig = - aSig;
+#endif
     return normalizeRoundAndPackFloat32(aSign ^ zSign, bExp, aSig, status);
 }
 
@@ -4776,7 +4839,11 @@ float32 float32_log2(float32 a, float_status *status)
     }
 
     if ( zSign )
+#ifdef _MSC_VER
+        zSig = 0 - zSig;
+#else
         zSig = -zSig;
+#endif
 
     return normalizeRoundAndPackFloat32(zSign, 0x85, zSig, status);
 }
@@ -5124,7 +5191,11 @@ float64 float64_rem(float64 a, float64 b, float_status *status)
     while ( 0 < expDiff ) {
         q = estimateDiv128To64( aSig, 0, bSig );
         q = ( 2 < q ) ? q - 2 : 0;
+#ifdef _MSC_VER
+        aSig = 0ULL - ( ( bSig>>2 ) * q );
+#else
         aSig = - ( ( bSig>>2 ) * q );
+#endif
         expDiff -= 62;
     }
     expDiff += 64;
@@ -5149,7 +5220,11 @@ float64 float64_rem(float64 a, float64 b, float_status *status)
         aSig = alternateASig;
     }
     zSign = ( (int64_t) aSig < 0 );
+#ifdef _MSC_VER
+    if ( zSign ) aSig = 0 - aSig;
+#else
     if ( zSign ) aSig = - aSig;
+#endif
     return normalizeRoundAndPackFloat64(aSign ^ zSign, bExp, aSig, status);
 
 }
@@ -5199,7 +5274,11 @@ float64 float64_log2(float64 a, float_status *status)
     }
 
     if ( zSign )
+#ifdef _MSC_VER
+        zSig = 0 - zSig;
+#else
         zSig = -zSig;
+#endif
     return normalizeRoundAndPackFloat64(zSign, 0x408, zSig, status);
 }
 
@@ -8085,7 +8164,7 @@ float128 float128_scalbn(float128 a, int n, float_status *status)
 
 }
 
-static void __attribute__((constructor)) softfloat_init(void)
+void softfloat_init(void)
 {
     union_float64 ua, ub, uc, ur;
 

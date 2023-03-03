@@ -1103,13 +1103,15 @@ struct CPUMIPSState {
     int saarp;
 
     /* Fields up to this point are cleared by a CPU reset */
+#ifdef _MSC_VER
+    int end_reset_fields;
+#else
     struct {} end_reset_fields;
+#endif
 
     /* Fields from here on are preserved across CPU reset. */
     CPUMIPSMVPContext *mvp;
-#if !defined(CONFIG_USER_ONLY)
     CPUMIPSTLBContext *tlb;
-#endif
 
     const mips_def_t *cpu_model;
     void *irq[8];
@@ -1117,6 +1119,9 @@ struct CPUMIPSState {
     struct MIPSITUState *itu;
     MemoryRegion *itc_tag; /* ITC Configuration Tags */
     target_ulong exception_base; /* ExceptionBase input to the core */
+
+    // Unicorn engine
+    struct uc_struct *uc;
 };
 
 /**
@@ -1132,13 +1137,12 @@ struct MIPSCPU {
 
     CPUNegativeOffsetState neg;
     CPUMIPSState env;
+
+    struct MIPSCPUClass cc;
 };
 
 
-void mips_cpu_list(void);
-
 #define cpu_signal_handler cpu_mips_signal_handler
-#define cpu_list mips_cpu_list
 
 extern void cpu_wrdsp(uint32_t rs, uint32_t mask_num, CPUMIPSState *env);
 extern uint32_t cpu_rddsp(uint32_t mask_num, CPUMIPSState *env);

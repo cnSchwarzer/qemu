@@ -1144,6 +1144,8 @@ void helper_##op(CPUPPCState *env, ppc_fprp_t *t, ppc_fprp_t *b) \
     struct PPC_DFP dfp;                                        \
     ppc_vsr_t vt;                                              \
                                                                \
+    memset(&dfp, 0, sizeof(dfp));                              \
+    memset(&vt, 0, sizeof(vt));                                \
     dfp_prepare_decimal##size(&dfp, 0, b, env);                \
                                                                \
     if (unlikely(decNumberIsSpecial(&dfp.b))) {                \

@@ -1,12 +1,9 @@
+#if 0
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
-#include "sysemu/kvm.h"
 #include "helper_regs.h"
 #include "mmu-hash64.h"
-#include "migration/cpu.h"
-#include "qapi/error.h"
-#include "qemu/main-loop.h"
 #include "kvm_ppc.h"
 #include "exec/helper-proto.h"
 
@@ -852,3 +849,4 @@ const VMStateDescription vmstate_ppc_cpu = {
         NULL
     }
 };
+#endif

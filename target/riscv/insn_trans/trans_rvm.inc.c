@@ -22,99 +22,112 @@
 static bool trans_mul(DisasContext *ctx, arg_mul *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith(ctx, a, &tcg_gen_mul_tl);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith(tcg_ctx, a, &tcg_gen_mul_tl);
 }
 
 static bool trans_mulh(DisasContext *ctx, arg_mulh *a)
 {
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
     REQUIRE_EXT(ctx, RVM);
-    TCGv source1 = tcg_temp_new();
-    TCGv source2 = tcg_temp_new();
-    gen_get_gpr(source1, a->rs1);
-    gen_get_gpr(source2, a->rs2);
+    TCGv source1 = tcg_temp_new(tcg_ctx);
+    TCGv source2 = tcg_temp_new(tcg_ctx);
+    gen_get_gpr(tcg_ctx, source1, a->rs1);
+    gen_get_gpr(tcg_ctx, source2, a->rs2);
 
-    tcg_gen_muls2_tl(source2, source1, source1, source2);
+    tcg_gen_muls2_tl(tcg_ctx, source2, source1, source1, source2);
 
-    gen_set_gpr(a->rd, source1);
-    tcg_temp_free(source1);
-    tcg_temp_free(source2);
+    gen_set_gpr(tcg_ctx, a->rd, source1);
+    tcg_temp_free(tcg_ctx, source1);
+    tcg_temp_free(tcg_ctx, source2);
     return true;
 }
 
 static bool trans_mulhsu(DisasContext *ctx, arg_mulhsu *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith(ctx, a, &gen_mulhsu);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith(tcg_ctx, a, &gen_mulhsu);
 }
 
 static bool trans_mulhu(DisasContext *ctx, arg_mulhu *a)
 {
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
     REQUIRE_EXT(ctx, RVM);
-    TCGv source1 = tcg_temp_new();
-    TCGv source2 = tcg_temp_new();
-    gen_get_gpr(source1, a->rs1);
-    gen_get_gpr(source2, a->rs2);
+    TCGv source1 = tcg_temp_new(tcg_ctx);
+    TCGv source2 = tcg_temp_new(tcg_ctx);
+    gen_get_gpr(tcg_ctx, source1, a->rs1);
+    gen_get_gpr(tcg_ctx, source2, a->rs2);
 
-    tcg_gen_mulu2_tl(source2, source1, source1, source2);
+    tcg_gen_mulu2_tl(tcg_ctx, source2, source1, source1, source2);
 
-    gen_set_gpr(a->rd, source1);
-    tcg_temp_free(source1);
-    tcg_temp_free(source2);
+    gen_set_gpr(tcg_ctx, a->rd, source1);
+    tcg_temp_free(tcg_ctx, source1);
+    tcg_temp_free(tcg_ctx, source2);
     return true;
 }
 
 static bool trans_div(DisasContext *ctx, arg_div *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith(ctx, a, &gen_div);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith(tcg_ctx, a, &gen_div);
 }
 
 static bool trans_divu(DisasContext *ctx, arg_divu *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith(ctx, a, &gen_divu);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith(tcg_ctx, a, &gen_divu);
 }
 
 static bool trans_rem(DisasContext *ctx, arg_rem *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith(ctx, a, &gen_rem);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith(tcg_ctx, a, &gen_rem);
 }
 
 static bool trans_remu(DisasContext *ctx, arg_remu *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith(ctx, a, &gen_remu);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith(tcg_ctx, a, &gen_remu);
 }
 
 #ifdef TARGET_RISCV64
 static bool trans_mulw(DisasContext *ctx, arg_mulw *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith(ctx, a, &gen_mulw);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith(tcg_ctx, a, &gen_mulw);
 }
 
 static bool trans_divw(DisasContext *ctx, arg_divw *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith_div_w(ctx, a, &gen_div);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith_div_w(tcg_ctx, a, &gen_div);
 }
 
 static bool trans_divuw(DisasContext *ctx, arg_divuw *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith_div_uw(ctx, a, &gen_divu);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith_div_uw(tcg_ctx, a, &gen_divu);
 }
 
 static bool trans_remw(DisasContext *ctx, arg_remw *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith_div_w(ctx, a, &gen_rem);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith_div_w(tcg_ctx, a, &gen_rem);
 }
 
 static bool trans_remuw(DisasContext *ctx, arg_remuw *a)
 {
     REQUIRE_EXT(ctx, RVM);
-    return gen_arith_div_uw(ctx, a, &gen_remu);
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;
+    return gen_arith_div_uw(tcg_ctx, a, &gen_remu);
 }
 #endif

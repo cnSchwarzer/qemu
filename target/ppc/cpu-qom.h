@@ -28,12 +28,9 @@
 #define TYPE_POWERPC_CPU "powerpc-cpu"
 #endif
 
-#define POWERPC_CPU_CLASS(klass) \
-    OBJECT_CLASS_CHECK(PowerPCCPUClass, (klass), TYPE_POWERPC_CPU)
-#define POWERPC_CPU(obj) \
-    OBJECT_CHECK(PowerPCCPU, (obj), TYPE_POWERPC_CPU)
-#define POWERPC_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(PowerPCCPUClass, (obj), TYPE_POWERPC_CPU)
+#define POWERPC_CPU(obj) ((PowerPCCPU *)obj)
+#define POWERPC_CPU_CLASS(klass) ((PowerPCCPUClass *)klass)
+#define POWERPC_CPU_GET_CLASS(obj) (&((PowerPCCPU *)obj)->cc)
 
 typedef struct PowerPCCPU PowerPCCPU;
 typedef struct CPUPPCState CPUPPCState;
@@ -164,10 +161,7 @@ typedef struct PowerPCCPUClass {
     CPUClass parent_class;
     /*< public >*/
 
-    DeviceRealize parent_realize;
-    DeviceUnrealize parent_unrealize;
-    DeviceReset parent_reset;
-    void (*parent_parse_features)(const char *type, char *str, Error **errp);
+    void (*parent_reset)(CPUState *cpu);
 
     uint32_t pvr;
     bool (*pvr_match)(struct PowerPCCPUClass *pcc, uint32_t pvr);
@@ -185,10 +179,6 @@ typedef struct PowerPCCPUClass {
     uint32_t flags;
     int bfd_mach;
     uint32_t l1_dcache_size, l1_icache_size;
-#ifndef CONFIG_USER_ONLY
-    unsigned int gdb_num_sprs;
-    const char *gdb_spr_xml;
-#endif
     const PPCHash64Options *hash64_opts;
     struct ppc_radix_page_info *radix_page_info;
     uint32_t lrg_decr_bits;
@@ -199,13 +189,13 @@ typedef struct PowerPCCPUClass {
     bool (*interrupts_big_endian)(PowerPCCPU *cpu);
 } PowerPCCPUClass;
 
-#ifndef CONFIG_USER_ONLY
 typedef struct PPCTimebase {
     uint64_t guest_timebase;
     int64_t time_of_the_day_ns;
     bool runstate_paused;
 } PPCTimebase;
 
+#if 0
 extern const VMStateDescription vmstate_ppc_timebase;
 
 #define VMSTATE_PPC_TIMEBASE_V(_field, _state, _version) {            \
@@ -220,5 +210,4 @@ extern const VMStateDescription vmstate_ppc_timebase;
 void cpu_ppc_clock_vm_state_change(void *opaque, int running,
                                    RunState state);
 #endif
-
 #endif

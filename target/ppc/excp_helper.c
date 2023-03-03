@@ -17,7 +17,6 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "qemu/osdep.h"
-#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
@@ -37,24 +36,6 @@
 
 /*****************************************************************************/
 /* Exception processing */
-#if defined(CONFIG_USER_ONLY)
-void ppc_cpu_do_interrupt(CPUState *cs)
-{
-    PowerPCCPU *cpu = POWERPC_CPU(cs);
-    CPUPPCState *env = &cpu->env;
-
-    cs->exception_index = POWERPC_EXCP_NONE;
-    env->error_code = 0;
-}
-
-static void ppc_hw_interrupt(CPUPPCState *env)
-{
-    CPUState *cs = env_cpu(env);
-
-    cs->exception_index = POWERPC_EXCP_NONE;
-    env->error_code = 0;
-}
-#else /* defined(CONFIG_USER_ONLY) */
 static inline void dump_syscall(CPUPPCState *env)
 {
     qemu_log_mask(CPU_LOG_INT, "syscall r0=%016" PRIx64 " r3=%016" PRIx64
@@ -272,10 +253,12 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
              */
             fprintf(stderr, "Machine check while not allowed. "
                     "Entering checkstop state\n");
+#if 0
             if (qemu_log_separate()) {
                 qemu_log("Machine check while not allowed. "
                         "Entering checkstop state\n");
             }
+#endif
             cs->halted = 1;
             cpu_interrupt_exittb(cs);
         }
@@ -328,7 +311,11 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
         }
         if (env->mpic_proxy) {
             /* IACK the IRQ on delivery */
-            env->spr[SPR_BOOKE_EPR] = ldl_phys(cs->as, env->mpic_iack);
+#ifdef UNICORN_ARCH_POSTFIX
+            env->spr[SPR_BOOKE_EPR] = glue(ldl_phys, UNICORN_ARCH_POSTFIX)(cs->uc, cs->as, env->mpic_iack);
+#else
+            env->spr[SPR_BOOKE_EPR] = ldl_phys(cs->uc, cs->as, env->mpic_iack);
+#endif
         }
         break;
     case POWERPC_EXCP_ALIGN:     /* Alignment exception                      */
@@ -388,6 +375,7 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
          */
         env->nip += 4;
 
+#if 0
         /* "PAPR mode" built-in hypercall emulation */
         if ((lev == 1) && cpu->vhyp) {
             PPCVirtualHypervisorClass *vhc =
@@ -395,6 +383,7 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
             vhc->hypercall(cpu->vhyp, cpu);
             return;
         }
+#endif
         if (lev == 1) {
             new_msr |= (target_ulong)MSR_HVB;
         }
@@ -763,7 +752,11 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
 
     /* Jump to handler */
     vector = env->excp_vectors[excp];
+#ifdef _MSC_VER
+    if (vector == (target_ulong)(0ULL - 1ULL)) {
+#else
     if (vector == (target_ulong)-1ULL) {
+#endif
         cpu_abort(cs, "Raised an exception without defined vector %d\n",
                   excp);
     }
@@ -991,7 +984,6 @@ void ppc_cpu_do_fwnmi_machine_check(CPUState *cs, target_ulong vector)
 
     powerpc_set_excp_state(cpu, vector, msr);
 }
-#endif /* !CONFIG_USER_ONLY */
 
 bool ppc_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
@@ -1057,7 +1049,6 @@ void helper_raise_exception(CPUPPCState *env, uint32_t exception)
     raise_exception_err_ra(env, exception, 0, 0);
 }
 
-#if !defined(CONFIG_USER_ONLY)
 void helper_store_msr(CPUPPCState *env, target_ulong val)
 {
     uint32_t excp = hreg_store_msr(env, val, 0);
@@ -1070,7 +1061,11 @@ void helper_store_msr(CPUPPCState *env, target_ulong val)
 }
 
 #if defined(TARGET_PPC64)
+#if defined(_MSC_VER) && defined(__clang__)
+void helper_pminsn(CPUPPCState *env, uint32_t insn)
+#else
 void helper_pminsn(CPUPPCState *env, powerpc_pm_insn_t insn)
+#endif
 {
     CPUState *cs;
 
@@ -1169,7 +1164,6 @@ void helper_rfmci(CPUPPCState *env)
     /* FIXME: choose CSRR1 or MCSRR1 based on cpu type */
     do_rfi(env, env->spr[SPR_BOOKE_MCSRR0], env->spr[SPR_BOOKE_MCSRR1]);
 }
-#endif
 
 void helper_tw(CPUPPCState *env, target_ulong arg1, target_ulong arg2,
                uint32_t flags)
@@ -1199,7 +1193,6 @@ void helper_td(CPUPPCState *env, target_ulong arg1, target_ulong arg2,
 }
 #endif
 
-#if !defined(CONFIG_USER_ONLY)
 /*****************************************************************************/
 /* PowerPC 601 specific instructions (POWER bridge) */
 
@@ -1243,27 +1236,22 @@ void helper_msgclr(CPUPPCState *env, target_ulong rb)
     env->pending_interrupts &= ~(1 << irq);
 }
 
-void helper_msgsnd(target_ulong rb)
+void helper_msgsnd(CPUPPCState *env, target_ulong rb)
 {
     int irq = dbell2irq(rb);
     int pir = rb & DBELL_PIRTAG_MASK;
-    CPUState *cs;
+    CPUState *cs = (CPUState *)env;
+    PowerPCCPU *cpu = POWERPC_CPU(env->uc->cpu);
+    CPUPPCState *cenv = &cpu->env;
 
     if (irq < 0) {
         return;
     }
 
-    qemu_mutex_lock_iothread();
-    CPU_FOREACH(cs) {
-        PowerPCCPU *cpu = POWERPC_CPU(cs);
-        CPUPPCState *cenv = &cpu->env;
-
-        if ((rb & DBELL_BRDCAST) || (cenv->spr[SPR_BOOKE_PIR] == pir)) {
-            cenv->pending_interrupts |= 1 << irq;
-            cpu_interrupt(cs, CPU_INTERRUPT_HARD);
-        }
+    if ((rb & DBELL_BRDCAST) || (cenv->spr[SPR_BOOKE_PIR] == pir)) {
+        cenv->pending_interrupts |= 1 << irq;
+        cpu_interrupt(cs, CPU_INTERRUPT_HARD);
     }
-    qemu_mutex_unlock_iothread();
 }
 
 /* Server Processor Control */
@@ -1287,25 +1275,20 @@ void helper_book3s_msgclr(CPUPPCState *env, target_ulong rb)
     env->pending_interrupts &= ~(1 << PPC_INTERRUPT_HDOORBELL);
 }
 
-static void book3s_msgsnd_common(int pir, int irq)
+static void book3s_msgsnd_common(CPUPPCState *env, int pir, int irq)
 {
-    CPUState *cs;
+    CPUState *cs = (CPUState *)env;
+    PowerPCCPU *cpu = POWERPC_CPU(env->uc->cpu);
+    CPUPPCState *cenv = &cpu->env;
 
-    qemu_mutex_lock_iothread();
-    CPU_FOREACH(cs) {
-        PowerPCCPU *cpu = POWERPC_CPU(cs);
-        CPUPPCState *cenv = &cpu->env;
-
-        /* TODO: broadcast message to all threads of the same  processor */
-        if (cenv->spr_cb[SPR_PIR].default_value == pir) {
-            cenv->pending_interrupts |= 1 << irq;
-            cpu_interrupt(cs, CPU_INTERRUPT_HARD);
-        }
+    /* TODO: broadcast message to all threads of the same  processor */
+    if (cenv->spr_cb[SPR_PIR].default_value == pir) {
+        cenv->pending_interrupts |= 1 << irq;
+        cpu_interrupt(cs, CPU_INTERRUPT_HARD);
     }
-    qemu_mutex_unlock_iothread();
 }
 
-void helper_book3s_msgsnd(target_ulong rb)
+void helper_book3s_msgsnd(CPUPPCState *env, target_ulong rb)
 {
     int pir = rb & DBELL_PROCIDTAG_MASK;
 
@@ -1313,7 +1296,7 @@ void helper_book3s_msgsnd(target_ulong rb)
         return;
     }
 
-    book3s_msgsnd_common(pir, PPC_INTERRUPT_HDOORBELL);
+    book3s_msgsnd_common(env, pir, PPC_INTERRUPT_HDOORBELL);
 }
 
 #if defined(TARGET_PPC64)
@@ -1344,9 +1327,8 @@ void helper_book3s_msgsndp(CPUPPCState *env, target_ulong rb)
 
     /* TODO: TCG supports only one thread */
 
-    book3s_msgsnd_common(pir, PPC_INTERRUPT_DOORBELL);
+    book3s_msgsnd_common(env, pir, PPC_INTERRUPT_DOORBELL);
 }
-#endif
 #endif
 
 void ppc_cpu_do_unaligned_access(CPUState *cs, vaddr vaddr,

@@ -20,7 +20,6 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "cpu.h"
-#include "qemu/main-loop.h"
 #include "exec/exec-all.h"
 #include "exec/helper-proto.h"
 
@@ -68,8 +67,6 @@ target_ulong helper_csrrc(CPURISCVState *env, target_ulong src,
     }
     return val;
 }
-
-#ifndef CONFIG_USER_ONLY
 
 target_ulong helper_sret(CPURISCVState *env, target_ulong cpu_pc_deb)
 {
@@ -201,4 +198,11 @@ void helper_tlb_flush(CPURISCVState *env)
     }
 }
 
-#endif /* !CONFIG_USER_ONLY */
+void helper_uc_riscv_exit(CPURISCVState *env)
+{
+    CPUState *cs = env_cpu(env);
+
+    cs->exception_index = EXCP_HLT;
+    cs->halted = 1;
+    cpu_loop_exit(cs);
+}

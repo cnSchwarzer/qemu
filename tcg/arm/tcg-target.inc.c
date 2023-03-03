@@ -27,7 +27,7 @@
 
 int arm_arch = __ARM_ARCH;
 
-#ifndef use_idiv_instructions
+#ifndef __ARM_ARCH_EXT_IDIV__
 bool use_idiv_instructions;
 #endif
 
@@ -1235,6 +1235,9 @@ QEMU_BUILD_BUG_ON(offsetof(CPUTLBDescFast, table) != 4);
 static TCGReg tcg_out_tlb_read(TCGContext *s, TCGReg addrlo, TCGReg addrhi,
                                MemOp opc, int mem_index, bool is_load)
 {
+#ifdef TARGET_ARM
+    struct uc_struct *uc = s->uc;
+#endif
     int cmp_off = (is_load ? offsetof(CPUTLBEntry, addr_read)
                    : offsetof(CPUTLBEntry, addr_write));
     int fast_off = TLB_MASK_TABLE_OFS(mem_index);
@@ -2198,7 +2201,7 @@ static void tcg_target_init(TCGContext *s)
 {
     /* Only probe for the platform and capabilities if we havn't already
        determined maximum values at compile time.  */
-#ifndef use_idiv_instructions
+#ifndef __ARM_ARCH_EXT_IDIV__
     {
         unsigned long hwcap = qemu_getauxval(AT_HWCAP);
         use_idiv_instructions = (hwcap & HWCAP_ARM_IDIVA) != 0;
@@ -2211,15 +2214,15 @@ static void tcg_target_init(TCGContext *s)
         }
     }
 
-    tcg_target_available_regs[TCG_TYPE_I32] = 0xffff;
+    s->tcg_target_available_regs[TCG_TYPE_I32] = 0xffff;
 
-    tcg_target_call_clobber_regs = 0;
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R0);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R1);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R2);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R3);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R12);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R14);
+    s->tcg_target_call_clobber_regs = 0;
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R0);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R1);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R2);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R3);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R12);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R14);
 
     s->reserved_regs = 0;
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_CALL_STACK);
@@ -2356,7 +2359,7 @@ static const DebugFrame debug_frame = {
     }
 };
 
-void tcg_register_jit(void *buf, size_t buf_size)
+void tcg_register_jit(TCGContext *s, void *buf, size_t buf_size)
 {
-    tcg_register_jit_int(buf, buf_size, &debug_frame, sizeof(debug_frame));
+    tcg_register_jit_int(s, buf, buf_size, &debug_frame, sizeof(debug_frame));
 }

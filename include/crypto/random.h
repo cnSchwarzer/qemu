@@ -21,30 +21,13 @@
 #ifndef QCRYPTO_RANDOM_H
 #define QCRYPTO_RANDOM_H
 
-
-/**
- * qcrypto_random_bytes:
- * @buf: the buffer to fill
- * @buflen: length of @buf in bytes
- * @errp: pointer to a NULL-initialized error object
- *
- * Fill @buf with @buflen bytes of cryptographically strong
- * random data
- *
- * Returns 0 on success, -1 on error
- */
-int qcrypto_random_bytes(void *buf,
-                         size_t buflen,
-                         Error **errp);
-
 /**
  * qcrypto_random_init:
- * @errp: pointer to a NULL-initialized error object
  *
  * Initializes the handles used by qcrypto_random_bytes
  *
  * Returns 0 on success, -1 on error
  */
-int qcrypto_random_init(Error **errp);
+int qcrypto_random_init(void);
 
 #endif /* QCRYPTO_RANDOM_H */

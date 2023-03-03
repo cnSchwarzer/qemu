@@ -18,14 +18,9 @@
  */
 
 #include "qemu/osdep.h"
-#include "sysemu/hw_accel.h"
-#include "sysemu/kvm.h"
-#include "kvm_ppc.h"
 #include "sysemu/cpus.h"
-#include "qemu/error-report.h"
-#include "qapi/error.h"
-#include "qapi/visitor.h"
 #include "cpu-models.h"
+#include "cpu.h"
 
 typedef struct {
     const char *name;
@@ -144,13 +139,12 @@ bool ppc_check_compat(PowerPCCPU *cpu, uint32_t compat_pvr,
 {
     PowerPCCPUClass *pcc = POWERPC_CPU_GET_CLASS(cpu);
 
-#if !defined(CONFIG_USER_ONLY)
-    g_assert(cpu->vhyp);
-#endif
+    // g_assert(cpu->vhyp);
 
     return pcc_compat(pcc, compat_pvr, min_compat_pvr, max_compat_pvr);
 }
 
+#if 0
 bool ppc_type_check_compat(const char *cputype, uint32_t compat_pvr,
                            uint32_t min_compat_pvr, uint32_t max_compat_pvr)
 {
@@ -158,7 +152,7 @@ bool ppc_type_check_compat(const char *cputype, uint32_t compat_pvr,
     return pcc_compat(pcc, compat_pvr, min_compat_pvr, max_compat_pvr);
 }
 
-void ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr, Error **errp)
+void ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr)
 {
     const CompatInfo *compat = compat_by_pvr(compat_pvr);
     CPUPPCState *env = &cpu->env;
@@ -195,7 +189,6 @@ void ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr, Error **errp)
 
 typedef struct {
     uint32_t compat_pvr;
-    Error *err;
 } SetCompatState;
 
 static void do_set_compat(CPUState *cs, run_on_cpu_data arg)
@@ -206,7 +199,7 @@ static void do_set_compat(CPUState *cs, run_on_cpu_data arg)
     ppc_set_compat(cpu, s->compat_pvr, &s->err);
 }
 
-void ppc_set_compat_all(uint32_t compat_pvr, Error **errp)
+void ppc_set_compat_all(uint32_t compat_pvr)
 {
     CPUState *cs;
 
@@ -219,7 +212,9 @@ void ppc_set_compat_all(uint32_t compat_pvr, Error **errp)
         run_on_cpu(cs, do_set_compat, RUN_ON_CPU_HOST_PTR(&s));
 
         if (s.err) {
+#if 0
             error_propagate(errp, s.err);
+#endif
             return;
         }
     }
@@ -332,3 +327,4 @@ void ppc_compat_add_property(Object *obj, const char *name,
 out:
     error_propagate(errp, local_err);
 }
+#endif

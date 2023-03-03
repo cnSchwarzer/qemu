@@ -4,6 +4,7 @@
 #include "exec/translator.h"
 #include "internals.h"
 
+struct uc_struct;
 
 /* internal defines */
 typedef struct DisasContext {
@@ -24,9 +25,7 @@ typedef struct DisasContext {
     int thumb;
     int sctlr_b;
     MemOp be_data;
-#if !defined(CONFIG_USER_ONLY)
     int user;
-#endif
     ARMMMUIdx mmu_idx; /* MMU index to use for normal loads/stores */
     uint8_t tbii;      /* TBI1|TBI0 for insns */
     uint8_t tbid;      /* TBI1|TBI0 for data */
@@ -95,6 +94,9 @@ typedef struct DisasContext {
 #define TMP_A64_MAX 16
     int tmp_a64_count;
     TCGv_i64 tmp_a64[TMP_A64_MAX];
+
+    // Unicorn
+    struct uc_struct *uc;
 } DisasContext;
 
 typedef struct DisasCompare {
@@ -102,11 +104,6 @@ typedef struct DisasCompare {
     TCGv_i32 value;
     bool value_global;
 } DisasCompare;
-
-/* Share the TCG temporaries common between 32 and 64 bit modes.  */
-extern TCGv_i32 cpu_NF, cpu_ZF, cpu_CF, cpu_VF;
-extern TCGv_i64 cpu_exclusive_addr;
-extern TCGv_i64 cpu_exclusive_val;
 
 static inline int arm_dc_feature(DisasContext *dc, int feature)
 {
@@ -173,11 +170,11 @@ static inline void disas_set_insn_syndrome(DisasContext *s, uint32_t syn)
 #define DISAS_EXIT      DISAS_TARGET_9
 
 #ifdef TARGET_AARCH64
-void a64_translate_init(void);
-void gen_a64_set_pc_im(uint64_t val);
+void a64_translate_init(struct uc_struct *uc);
+void gen_a64_set_pc_im(TCGContext *tcg_ctx, uint64_t val);
 extern const TranslatorOps aarch64_translator_ops;
 #else
-static inline void a64_translate_init(void)
+static inline void a64_translate_init(struct uc_struct *uc)
 {
 }
 
@@ -186,76 +183,78 @@ static inline void gen_a64_set_pc_im(uint64_t val)
 }
 #endif
 
-void arm_test_cc(DisasCompare *cmp, int cc);
-void arm_free_cc(DisasCompare *cmp);
-void arm_jump_cc(DisasCompare *cmp, TCGLabel *label);
-void arm_gen_test_cc(int cc, TCGLabel *label);
+void arm_test_cc(TCGContext *tcg_ctx, DisasCompare *cmp, int cc);
+void arm_free_cc(TCGContext *tcg_ctx, DisasCompare *cmp);
+void arm_jump_cc(TCGContext *tcg_ctx, DisasCompare *cmp, TCGLabel *label);
+void arm_gen_test_cc(TCGContext *tcg_ctx, int cc, TCGLabel *label);
 
 /* Return state of Alternate Half-precision flag, caller frees result */
-static inline TCGv_i32 get_ahp_flag(void)
+static inline TCGv_i32 get_ahp_flag(TCGContext *tcg_ctx)
 {
-    TCGv_i32 ret = tcg_temp_new_i32();
+    TCGv_i32 ret = tcg_temp_new_i32(tcg_ctx);
 
-    tcg_gen_ld_i32(ret, cpu_env,
+    tcg_gen_ld_i32(tcg_ctx, ret, tcg_ctx->cpu_env,
                    offsetof(CPUARMState, vfp.xregs[ARM_VFP_FPSCR]));
-    tcg_gen_extract_i32(ret, ret, 26, 1);
+    tcg_gen_extract_i32(tcg_ctx, ret, ret, 26, 1);
 
     return ret;
 }
 
 /* Set bits within PSTATE.  */
-static inline void set_pstate_bits(uint32_t bits)
+static inline void set_pstate_bits(TCGContext *tcg_ctx, uint32_t bits)
 {
-    TCGv_i32 p = tcg_temp_new_i32();
+    TCGv_i32 p = tcg_temp_new_i32(tcg_ctx);
 
     tcg_debug_assert(!(bits & CACHED_PSTATE_BITS));
 
-    tcg_gen_ld_i32(p, cpu_env, offsetof(CPUARMState, pstate));
-    tcg_gen_ori_i32(p, p, bits);
-    tcg_gen_st_i32(p, cpu_env, offsetof(CPUARMState, pstate));
-    tcg_temp_free_i32(p);
+    tcg_gen_ld_i32(tcg_ctx, p, tcg_ctx->cpu_env, offsetof(CPUARMState, pstate));
+    tcg_gen_ori_i32(tcg_ctx, p, p, bits);
+    tcg_gen_st_i32(tcg_ctx, p, tcg_ctx->cpu_env, offsetof(CPUARMState, pstate));
+    tcg_temp_free_i32(tcg_ctx, p);
 }
 
 /* Clear bits within PSTATE.  */
-static inline void clear_pstate_bits(uint32_t bits)
+static inline void clear_pstate_bits(TCGContext *tcg_ctx, uint32_t bits)
 {
-    TCGv_i32 p = tcg_temp_new_i32();
+    TCGv_i32 p = tcg_temp_new_i32(tcg_ctx);
 
     tcg_debug_assert(!(bits & CACHED_PSTATE_BITS));
 
-    tcg_gen_ld_i32(p, cpu_env, offsetof(CPUARMState, pstate));
-    tcg_gen_andi_i32(p, p, ~bits);
-    tcg_gen_st_i32(p, cpu_env, offsetof(CPUARMState, pstate));
-    tcg_temp_free_i32(p);
+    tcg_gen_ld_i32(tcg_ctx, p, tcg_ctx->cpu_env, offsetof(CPUARMState, pstate));
+    tcg_gen_andi_i32(tcg_ctx, p, p, ~bits);
+    tcg_gen_st_i32(tcg_ctx, p, tcg_ctx->cpu_env, offsetof(CPUARMState, pstate));
+    tcg_temp_free_i32(tcg_ctx, p);
 }
 
 /* If the singlestep state is Active-not-pending, advance to Active-pending. */
 static inline void gen_ss_advance(DisasContext *s)
 {
+    TCGContext *tcg_ctx = s->uc->tcg_ctx;
     if (s->ss_active) {
         s->pstate_ss = 0;
-        clear_pstate_bits(PSTATE_SS);
+        clear_pstate_bits(tcg_ctx, PSTATE_SS);
     }
 }
 
-static inline void gen_exception(int excp, uint32_t syndrome,
+static inline void gen_exception(TCGContext *tcg_ctx, int excp, uint32_t syndrome,
                                  uint32_t target_el)
 {
-    TCGv_i32 tcg_excp = tcg_const_i32(excp);
-    TCGv_i32 tcg_syn = tcg_const_i32(syndrome);
-    TCGv_i32 tcg_el = tcg_const_i32(target_el);
+    TCGv_i32 tcg_excp = tcg_const_i32(tcg_ctx, excp);
+    TCGv_i32 tcg_syn = tcg_const_i32(tcg_ctx, syndrome);
+    TCGv_i32 tcg_el = tcg_const_i32(tcg_ctx, target_el);
 
-    gen_helper_exception_with_syndrome(cpu_env, tcg_excp,
+    gen_helper_exception_with_syndrome(tcg_ctx, tcg_ctx->cpu_env, tcg_excp,
                                        tcg_syn, tcg_el);
 
-    tcg_temp_free_i32(tcg_el);
-    tcg_temp_free_i32(tcg_syn);
-    tcg_temp_free_i32(tcg_excp);
+    tcg_temp_free_i32(tcg_ctx, tcg_el);
+    tcg_temp_free_i32(tcg_ctx, tcg_syn);
+    tcg_temp_free_i32(tcg_ctx, tcg_excp);
 }
 
 /* Generate an architectural singlestep exception */
 static inline void gen_swstep_exception(DisasContext *s, int isv, int ex)
 {
+    TCGContext *tcg_ctx = s->uc->tcg_ctx;
     bool same_el = (s->debug_target_el == s->current_el);
 
     /*
@@ -264,7 +263,7 @@ static inline void gen_swstep_exception(DisasContext *s, int isv, int ex)
      */
     assert(s->debug_target_el >= s->current_el);
 
-    gen_exception(EXCP_UDEF, syn_swstep(same_el, isv, ex), s->debug_target_el);
+    gen_exception(tcg_ctx, EXCP_UDEF, syn_swstep(same_el, isv, ex), s->debug_target_el);
 }
 
 /*
@@ -288,16 +287,15 @@ extern const GVecGen4 uqadd_op[4];
 extern const GVecGen4 sqadd_op[4];
 extern const GVecGen4 uqsub_op[4];
 extern const GVecGen4 sqsub_op[4];
-void gen_cmtst_i64(TCGv_i64 d, TCGv_i64 a, TCGv_i64 b);
-void gen_ushl_i32(TCGv_i32 d, TCGv_i32 a, TCGv_i32 b);
-void gen_sshl_i32(TCGv_i32 d, TCGv_i32 a, TCGv_i32 b);
-void gen_ushl_i64(TCGv_i64 d, TCGv_i64 a, TCGv_i64 b);
-void gen_sshl_i64(TCGv_i64 d, TCGv_i64 a, TCGv_i64 b);
+void gen_cmtst_i64(TCGContext *, TCGv_i64 d, TCGv_i64 a, TCGv_i64 b);
+void gen_ushl_i32(TCGContext *, TCGv_i32 d, TCGv_i32 a, TCGv_i32 b);
+void gen_sshl_i32(TCGContext *, TCGv_i32 d, TCGv_i32 a, TCGv_i32 b);
+void gen_ushl_i64(TCGContext *, TCGv_i64 d, TCGv_i64 a, TCGv_i64 b);
+void gen_sshl_i64(TCGContext *, TCGv_i64 d, TCGv_i64 a, TCGv_i64 b);
 
 /*
  * Forward to the isar_feature_* tests given a DisasContext pointer.
  */
-#define dc_isar_feature(name, ctx) \
-    ({ DisasContext *ctx_ = (ctx); isar_feature_##name(ctx_->isar); })
+#define dc_isar_feature(name, ctx) isar_feature_##name(ctx->isar)
 
 #endif /* TARGET_ARM_TRANSLATE_H */

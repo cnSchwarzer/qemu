@@ -21,12 +21,9 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
-#include "qemu/module.h"
 #include "cpu-models.h"
 
-#if defined(CONFIG_USER_ONLY)
-#define TODO_USER_ONLY 1
-#endif
+#if 0
 
 /***************************************************************************/
 /* PowerPC CPU definitions                                                 */
@@ -35,33 +32,14 @@
 #define POWERPC_DEF_SVR(_name, _desc, _pvr, _svr, _type)                    \
     static void                                                             \
     glue(POWERPC_DEF_PREFIX(_pvr, _svr, _type), _cpu_class_init)            \
-    (ObjectClass *oc, void *data)                                           \
+    (CPUClass *oc, void *data)                                              \
     {                                                                       \
-        DeviceClass *dc = DEVICE_CLASS(oc);                                 \
         PowerPCCPUClass *pcc = POWERPC_CPU_CLASS(oc);                       \
                                                                             \
         pcc->pvr          = _pvr;                                           \
         pcc->svr          = _svr;                                           \
-        dc->desc          = _desc;                                          \
     }                                                                       \
-                                                                            \
-    static const TypeInfo                                                   \
-    glue(POWERPC_DEF_PREFIX(_pvr, _svr, _type), _cpu_type_info) = {         \
-        .name       = POWERPC_CPU_TYPE_NAME(_name),                           \
-        .parent     = stringify(_type) "-family-" TYPE_POWERPC_CPU,         \
-        .class_init =                                                       \
-            glue(POWERPC_DEF_PREFIX(_pvr, _svr, _type), _cpu_class_init),   \
-    };                                                                      \
-                                                                            \
-    static void                                                             \
-    glue(POWERPC_DEF_PREFIX(_pvr, _svr, _type), _cpu_register_types)(void)  \
-    {                                                                       \
-        type_register_static(                                               \
-            &glue(POWERPC_DEF_PREFIX(_pvr, _svr, _type), _cpu_type_info));  \
-    }                                                                       \
-                                                                            \
-    type_init(                                                              \
-        glue(POWERPC_DEF_PREFIX(_pvr, _svr, _type), _cpu_register_types))
+
 
 #define POWERPC_DEF(_name, _pvr, _type, _desc)                              \
     POWERPC_DEF_SVR(_name, _desc, _pvr, POWERPC_SVR_NONE, _type)
@@ -964,3 +942,4 @@ PowerPCCPUAlias ppc_cpu_aliases[] = {
     { "default", "604" },
     { NULL, NULL }
 };
+#endif

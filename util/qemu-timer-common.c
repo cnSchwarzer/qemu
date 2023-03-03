@@ -31,11 +31,10 @@
 
 int64_t clock_freq;
 
-static void __attribute__((constructor)) init_get_clock(void)
+void init_get_clock(void)
 {
     LARGE_INTEGER freq;
-    int ret;
-    ret = QueryPerformanceFrequency(&freq);
+    int ret = QueryPerformanceFrequency(&freq);
     if (ret == 0) {
         fprintf(stderr, "Could not calibrate ticks\n");
         exit(1);
@@ -47,7 +46,7 @@ static void __attribute__((constructor)) init_get_clock(void)
 
 int use_rt_clock;
 
-static void __attribute__((constructor)) init_get_clock(void)
+void init_get_clock(void)
 {
     struct timespec ts;
 

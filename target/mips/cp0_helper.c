@@ -21,7 +21,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "internal.h"
 #include "qemu/host-utils.h"
@@ -29,10 +28,9 @@
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 #include "exec/memop.h"
-#include "sysemu/kvm.h"
+//#include "sysemu/kvm.h"
 
 
-#ifndef CONFIG_USER_ONLY
 /* SMP helpers.  */
 static bool mips_vpe_is_wfi(MIPSCPU *c)
 {
@@ -46,13 +44,15 @@ static bool mips_vpe_is_wfi(MIPSCPU *c)
     return cpu->halted && mips_vpe_active(env);
 }
 
+#if 0
 static bool mips_vp_is_wfi(MIPSCPU *c)
 {
     CPUState *cpu = CPU(c);
     CPUMIPSState *env = &c->env;
 
-    return cpu->halted && mips_vp_active(env);
+    return cpu->halted && mips_vp_active(env, cpu);
 }
+#endif
 
 static inline void mips_vpe_wake(MIPSCPU *c)
 {
@@ -61,9 +61,7 @@ static inline void mips_vpe_wake(MIPSCPU *c)
      * because there might be other conditions that state that c should
      * be sleeping.
      */
-    qemu_mutex_lock_iothread();
     cpu_interrupt(CPU(c), CPU_INTERRUPT_WAKE);
-    qemu_mutex_unlock_iothread();
 }
 
 static inline void mips_vpe_sleep(MIPSCPU *cpu)
@@ -114,10 +112,8 @@ static inline void mips_tc_sleep(MIPSCPU *cpu, int tc)
  */
 static CPUMIPSState *mips_cpu_map_tc(CPUMIPSState *env, int *tc)
 {
-    MIPSCPU *cpu;
     CPUState *cs;
-    CPUState *other_cs;
-    int vpe_idx;
+    // int vpe_idx;
     int tc_idx = *tc;
 
     if (!(env->CP0_VPEConf0 & (1 << CP0VPEC0_MVP))) {
@@ -127,14 +123,20 @@ static CPUMIPSState *mips_cpu_map_tc(CPUMIPSState *env, int *tc)
     }
 
     cs = env_cpu(env);
-    vpe_idx = tc_idx / cs->nr_threads;
+    // vpe_idx = tc_idx / cs->nr_threads;
     *tc = tc_idx % cs->nr_threads;
+    return env;
+
+#if 0
+    MIPSCPU *cpu;
+    CPUState *other_cs;
     other_cs = qemu_get_cpu(vpe_idx);
     if (other_cs == NULL) {
         return env;
     }
     cpu = MIPS_CPU(other_cs);
     return &cpu->env;
+#endif
 }
 
 /*
@@ -345,7 +347,8 @@ target_ulong helper_mftc0_tcschefback(CPUMIPSState *env)
 
 target_ulong helper_mfc0_count(CPUMIPSState *env)
 {
-    return (int32_t)cpu_mips_get_count(env);
+    // return (int32_t)cpu_mips_get_count(env);
+    return 0;
 }
 
 target_ulong helper_mfc0_saar(CPUMIPSState *env)
@@ -1065,7 +1068,7 @@ void helper_mtc0_hwrena(CPUMIPSState *env, target_ulong arg1)
 
 void helper_mtc0_count(CPUMIPSState *env, target_ulong arg1)
 {
-    cpu_mips_store_count(env, arg1);
+    //cpu_mips_store_count(env, arg1);
 }
 
 void helper_mtc0_saari(CPUMIPSState *env, target_ulong arg1)
@@ -1084,7 +1087,7 @@ void helper_mtc0_saar(CPUMIPSState *env, target_ulong arg1)
         switch (target) {
         case 0:
             if (env->itu) {
-                itc_reconfigure(env->itu);
+                // itc_reconfigure(env->itu);
             }
             break;
         }
@@ -1101,7 +1104,7 @@ void helper_mthc0_saar(CPUMIPSState *env, target_ulong arg1)
         switch (target) {
         case 0:
             if (env->itu) {
-                itc_reconfigure(env->itu);
+                // itc_reconfigure(env->itu);
             }
             break;
         }
@@ -1154,17 +1157,17 @@ void helper_mttc0_entryhi(CPUMIPSState *env, target_ulong arg1)
 
 void helper_mtc0_compare(CPUMIPSState *env, target_ulong arg1)
 {
-    cpu_mips_store_compare(env, arg1);
+    // cpu_mips_store_compare(env, arg1);
 }
 
 void helper_mtc0_status(CPUMIPSState *env, target_ulong arg1)
 {
-    uint32_t val, old;
-
-    old = env->CP0_Status;
     cpu_mips_store_status(env, arg1);
-    val = env->CP0_Status;
 
+#if 0
+    uint32_t val, old;
+    val = env->CP0_Status;
+    old = env->CP0_Status;
     if (qemu_loglevel_mask(CPU_LOG_EXEC)) {
         qemu_log("Status %08x (%08x) => %08x (%08x) Cause %08x",
                 old, old & env->CP0_Cause & CP0Ca_IP_mask,
@@ -1188,6 +1191,7 @@ void helper_mtc0_status(CPUMIPSState *env, target_ulong arg1)
             break;
         }
     }
+#endif
 }
 
 void helper_mttc0_status(CPUMIPSState *env, target_ulong arg1)
@@ -1601,6 +1605,7 @@ target_ulong helper_emt(void)
 
 target_ulong helper_dvpe(CPUMIPSState *env)
 {
+#if 0 // FIXME
     CPUState *other_cs = first_cpu;
     target_ulong prev = env->mvp->CP0_MVPControl;
 
@@ -1613,10 +1618,13 @@ target_ulong helper_dvpe(CPUMIPSState *env)
         }
     }
     return prev;
+#endif
+    return 0;
 }
 
 target_ulong helper_evpe(CPUMIPSState *env)
 {
+#if 0
     CPUState *other_cs = first_cpu;
     target_ulong prev = env->mvp->CP0_MVPControl;
 
@@ -1632,13 +1640,14 @@ target_ulong helper_evpe(CPUMIPSState *env)
         }
     }
     return prev;
+#endif
+    return 0;
 }
-#endif /* !CONFIG_USER_ONLY */
 
 /* R6 Multi-threading */
-#ifndef CONFIG_USER_ONLY
 target_ulong helper_dvp(CPUMIPSState *env)
 {
+#if 0
     CPUState *other_cs = first_cpu;
     target_ulong prev = env->CP0_VPControl;
 
@@ -1653,10 +1662,14 @@ target_ulong helper_dvp(CPUMIPSState *env)
         env->CP0_VPControl |= (1 << CP0VPCtl_DIS);
     }
     return prev;
+#endif
+
+    return 0;
 }
 
 target_ulong helper_evp(CPUMIPSState *env)
 {
+#if 0
     CPUState *other_cs = first_cpu;
     target_ulong prev = env->CP0_VPControl;
 
@@ -1674,5 +1687,6 @@ target_ulong helper_evp(CPUMIPSState *env)
         env->CP0_VPControl &= ~(1 << CP0VPCtl_DIS);
     }
     return prev;
+#endif
+    return 0;
 }
-#endif /* !CONFIG_USER_ONLY */

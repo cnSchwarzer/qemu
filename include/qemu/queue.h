@@ -499,10 +499,17 @@ union {                                                                 \
 
 #define QTAILQ_LINK_PREV(link)                                          \
         ((link).tql_prev->tql_prev->tql_next)
+#ifndef _MSC_VER
 #define QTAILQ_LAST(head)                                               \
         ((typeof((head)->tqh_first)) QTAILQ_LINK_PREV((head)->tqh_circ))
 #define QTAILQ_PREV(elm, field)                                         \
         ((typeof((elm)->field.tqe_next)) QTAILQ_LINK_PREV((elm)->field.tqe_circ))
+#else
+#define QTAILQ_LAST(head)                                               \
+        (QTAILQ_LINK_PREV((head)->tqh_circ))
+#define QTAILQ_PREV(elm, field)                                         \
+        (QTAILQ_LINK_PREV((elm)->field.tqe_circ))
+#endif
 
 #define field_at_offset(base, offset, type)                                    \
         ((type *) (((char *) (base)) + (offset)))

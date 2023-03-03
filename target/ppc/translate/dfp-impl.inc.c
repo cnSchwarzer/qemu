@@ -1,53 +1,56 @@
 /*** Decimal Floating Point ***/
 
-static inline TCGv_ptr gen_fprp_ptr(int reg)
+static inline TCGv_ptr gen_fprp_ptr(TCGContext *tcg_ctx, int reg)
 {
-    TCGv_ptr r = tcg_temp_new_ptr();
-    tcg_gen_addi_ptr(r, cpu_env, offsetof(CPUPPCState, vsr[reg].u64[0]));
+    TCGv_ptr r = tcg_temp_new_ptr(tcg_ctx);
+    tcg_gen_addi_ptr(tcg_ctx, r, tcg_ctx->cpu_env, offsetof(CPUPPCState, vsr[reg].u64[0]));
     return r;
 }
 
 #define GEN_DFP_T_A_B_Rc(name)                   \
 static void gen_##name(DisasContext *ctx)        \
 {                                                \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_ptr rd, ra, rb;                         \
     if (unlikely(!ctx->fpu_enabled)) {           \
         gen_exception(ctx, POWERPC_EXCP_FPU);    \
         return;                                  \
     }                                            \
     gen_update_nip(ctx, ctx->base.pc_next - 4);  \
-    rd = gen_fprp_ptr(rD(ctx->opcode));          \
-    ra = gen_fprp_ptr(rA(ctx->opcode));          \
-    rb = gen_fprp_ptr(rB(ctx->opcode));          \
-    gen_helper_##name(cpu_env, rd, ra, rb);      \
+    rd = gen_fprp_ptr(tcg_ctx, rD(ctx->opcode));          \
+    ra = gen_fprp_ptr(tcg_ctx, rA(ctx->opcode));          \
+    rb = gen_fprp_ptr(tcg_ctx, rB(ctx->opcode));          \
+    gen_helper_##name(tcg_ctx, tcg_ctx->cpu_env, rd, ra, rb);      \
     if (unlikely(Rc(ctx->opcode) != 0)) {        \
         gen_set_cr1_from_fpscr(ctx);             \
     }                                            \
-    tcg_temp_free_ptr(rd);                       \
-    tcg_temp_free_ptr(ra);                       \
-    tcg_temp_free_ptr(rb);                       \
+    tcg_temp_free_ptr(tcg_ctx, rd);                       \
+    tcg_temp_free_ptr(tcg_ctx, ra);                       \
+    tcg_temp_free_ptr(tcg_ctx, rb);                       \
 }
 
 #define GEN_DFP_BF_A_B(name)                      \
 static void gen_##name(DisasContext *ctx)         \
 {                                                 \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_ptr ra, rb;                              \
     if (unlikely(!ctx->fpu_enabled)) {            \
         gen_exception(ctx, POWERPC_EXCP_FPU);     \
         return;                                   \
     }                                             \
     gen_update_nip(ctx, ctx->base.pc_next - 4);            \
-    ra = gen_fprp_ptr(rA(ctx->opcode));           \
-    rb = gen_fprp_ptr(rB(ctx->opcode));           \
-    gen_helper_##name(cpu_crf[crfD(ctx->opcode)], \
-                      cpu_env, ra, rb);           \
-    tcg_temp_free_ptr(ra);                        \
-    tcg_temp_free_ptr(rb);                        \
+    ra = gen_fprp_ptr(tcg_ctx, rA(ctx->opcode));           \
+    rb = gen_fprp_ptr(tcg_ctx, rB(ctx->opcode));           \
+    gen_helper_##name(tcg_ctx, cpu_crf[crfD(ctx->opcode)], \
+                      tcg_ctx->cpu_env, ra, rb);           \
+    tcg_temp_free_ptr(tcg_ctx, ra);                        \
+    tcg_temp_free_ptr(tcg_ctx, rb);                        \
 }
 
 #define GEN_DFP_BF_I_B(name)                      \
 static void gen_##name(DisasContext *ctx)         \
 {                                                 \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_i32 uim;                                 \
     TCGv_ptr rb;                                  \
     if (unlikely(!ctx->fpu_enabled)) {            \
@@ -55,17 +58,18 @@ static void gen_##name(DisasContext *ctx)         \
         return;                                   \
     }                                             \
     gen_update_nip(ctx, ctx->base.pc_next - 4);            \
-    uim = tcg_const_i32(UIMM5(ctx->opcode));      \
-    rb = gen_fprp_ptr(rB(ctx->opcode));           \
-    gen_helper_##name(cpu_crf[crfD(ctx->opcode)], \
-                      cpu_env, uim, rb);          \
-    tcg_temp_free_i32(uim);                       \
-    tcg_temp_free_ptr(rb);                        \
+    uim = tcg_const_i32(tcg_ctx, UIMM5(ctx->opcode));      \
+    rb = gen_fprp_ptr(tcg_ctx, rB(ctx->opcode));           \
+    gen_helper_##name(tcg_ctx, cpu_crf[crfD(ctx->opcode)], \
+                      tcg_ctx->cpu_env, uim, rb);          \
+    tcg_temp_free_i32(tcg_ctx, uim);                       \
+    tcg_temp_free_ptr(tcg_ctx, rb);                        \
 }
 
 #define GEN_DFP_BF_A_DCM(name)                    \
 static void gen_##name(DisasContext *ctx)         \
 {                                                 \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_ptr ra;                                  \
     TCGv_i32 dcm;                                 \
     if (unlikely(!ctx->fpu_enabled)) {            \
@@ -73,17 +77,18 @@ static void gen_##name(DisasContext *ctx)         \
         return;                                   \
     }                                             \
     gen_update_nip(ctx, ctx->base.pc_next - 4);   \
-    ra = gen_fprp_ptr(rA(ctx->opcode));           \
-    dcm = tcg_const_i32(DCM(ctx->opcode));        \
-    gen_helper_##name(cpu_crf[crfD(ctx->opcode)], \
-                      cpu_env, ra, dcm);          \
-    tcg_temp_free_ptr(ra);                        \
-    tcg_temp_free_i32(dcm);                       \
+    ra = gen_fprp_ptr(tcg_ctx, rA(ctx->opcode));           \
+    dcm = tcg_const_i32(tcg_ctx, DCM(ctx->opcode));        \
+    gen_helper_##name(tcg_ctx, cpu_crf[crfD(ctx->opcode)], \
+                      tcg_ctx->cpu_env, ra, dcm);          \
+    tcg_temp_free_ptr(tcg_ctx, ra);                        \
+    tcg_temp_free_i32(tcg_ctx, dcm);                       \
 }
 
 #define GEN_DFP_T_B_U32_U32_Rc(name, u32f1, u32f2)    \
 static void gen_##name(DisasContext *ctx)             \
 {                                                     \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_ptr rt, rb;                                  \
     TCGv_i32 u32_1, u32_2;                            \
     if (unlikely(!ctx->fpu_enabled)) {                \
@@ -91,23 +96,24 @@ static void gen_##name(DisasContext *ctx)             \
         return;                                       \
     }                                                 \
     gen_update_nip(ctx, ctx->base.pc_next - 4);       \
-    rt = gen_fprp_ptr(rD(ctx->opcode));               \
-    rb = gen_fprp_ptr(rB(ctx->opcode));               \
-    u32_1 = tcg_const_i32(u32f1(ctx->opcode));        \
-    u32_2 = tcg_const_i32(u32f2(ctx->opcode));        \
-    gen_helper_##name(cpu_env, rt, rb, u32_1, u32_2); \
+    rt = gen_fprp_ptr(tcg_ctx, rD(ctx->opcode));               \
+    rb = gen_fprp_ptr(tcg_ctx, rB(ctx->opcode));               \
+    u32_1 = tcg_const_i32(tcg_ctx, u32f1(ctx->opcode));        \
+    u32_2 = tcg_const_i32(tcg_ctx, u32f2(ctx->opcode));        \
+    gen_helper_##name(tcg_ctx, tcg_ctx->cpu_env, rt, rb, u32_1, u32_2); \
     if (unlikely(Rc(ctx->opcode) != 0)) {             \
         gen_set_cr1_from_fpscr(ctx);                  \
     }                                                 \
-    tcg_temp_free_ptr(rt);                            \
-    tcg_temp_free_ptr(rb);                            \
-    tcg_temp_free_i32(u32_1);                         \
-    tcg_temp_free_i32(u32_2);                         \
+    tcg_temp_free_ptr(tcg_ctx, rt);                            \
+    tcg_temp_free_ptr(tcg_ctx, rb);                            \
+    tcg_temp_free_i32(tcg_ctx, u32_1);                         \
+    tcg_temp_free_i32(tcg_ctx, u32_2);                         \
 }
 
 #define GEN_DFP_T_A_B_I32_Rc(name, i32fld)       \
 static void gen_##name(DisasContext *ctx)        \
 {                                                \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_ptr rt, ra, rb;                         \
     TCGv_i32 i32;                                \
     if (unlikely(!ctx->fpu_enabled)) {           \
@@ -115,42 +121,44 @@ static void gen_##name(DisasContext *ctx)        \
         return;                                  \
     }                                            \
     gen_update_nip(ctx, ctx->base.pc_next - 4);  \
-    rt = gen_fprp_ptr(rD(ctx->opcode));          \
-    ra = gen_fprp_ptr(rA(ctx->opcode));          \
-    rb = gen_fprp_ptr(rB(ctx->opcode));          \
-    i32 = tcg_const_i32(i32fld(ctx->opcode));    \
-    gen_helper_##name(cpu_env, rt, ra, rb, i32); \
+    rt = gen_fprp_ptr(tcg_ctx, rD(ctx->opcode));          \
+    ra = gen_fprp_ptr(tcg_ctx, rA(ctx->opcode));          \
+    rb = gen_fprp_ptr(tcg_ctx, rB(ctx->opcode));          \
+    i32 = tcg_const_i32(tcg_ctx, i32fld(ctx->opcode));    \
+    gen_helper_##name(tcg_ctx, tcg_ctx->cpu_env, rt, ra, rb, i32); \
     if (unlikely(Rc(ctx->opcode) != 0)) {        \
         gen_set_cr1_from_fpscr(ctx);             \
     }                                            \
-    tcg_temp_free_ptr(rt);                       \
-    tcg_temp_free_ptr(rb);                       \
-    tcg_temp_free_ptr(ra);                       \
-    tcg_temp_free_i32(i32);                      \
+    tcg_temp_free_ptr(tcg_ctx, rt);                       \
+    tcg_temp_free_ptr(tcg_ctx, rb);                       \
+    tcg_temp_free_ptr(tcg_ctx, ra);                       \
+    tcg_temp_free_i32(tcg_ctx, i32);                      \
     }
 
 #define GEN_DFP_T_B_Rc(name)                     \
 static void gen_##name(DisasContext *ctx)        \
 {                                                \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_ptr rt, rb;                             \
     if (unlikely(!ctx->fpu_enabled)) {           \
         gen_exception(ctx, POWERPC_EXCP_FPU);    \
         return;                                  \
     }                                            \
     gen_update_nip(ctx, ctx->base.pc_next - 4);  \
-    rt = gen_fprp_ptr(rD(ctx->opcode));          \
-    rb = gen_fprp_ptr(rB(ctx->opcode));          \
-    gen_helper_##name(cpu_env, rt, rb);          \
+    rt = gen_fprp_ptr(tcg_ctx, rD(ctx->opcode));          \
+    rb = gen_fprp_ptr(tcg_ctx, rB(ctx->opcode));          \
+    gen_helper_##name(tcg_ctx, tcg_ctx->cpu_env, rt, rb);          \
     if (unlikely(Rc(ctx->opcode) != 0)) {        \
         gen_set_cr1_from_fpscr(ctx);             \
     }                                            \
-    tcg_temp_free_ptr(rt);                       \
-    tcg_temp_free_ptr(rb);                       \
+    tcg_temp_free_ptr(tcg_ctx, rt);                       \
+    tcg_temp_free_ptr(tcg_ctx, rb);                       \
     }
 
 #define GEN_DFP_T_FPR_I32_Rc(name, fprfld, i32fld) \
 static void gen_##name(DisasContext *ctx)          \
 {                                                  \
+    TCGContext *tcg_ctx = ctx->uc->tcg_ctx;      \
     TCGv_ptr rt, rs;                               \
     TCGv_i32 i32;                                  \
     if (unlikely(!ctx->fpu_enabled)) {             \
@@ -158,16 +166,16 @@ static void gen_##name(DisasContext *ctx)          \
         return;                                    \
     }                                              \
     gen_update_nip(ctx, ctx->base.pc_next - 4);    \
-    rt = gen_fprp_ptr(rD(ctx->opcode));            \
-    rs = gen_fprp_ptr(fprfld(ctx->opcode));        \
-    i32 = tcg_const_i32(i32fld(ctx->opcode));      \
-    gen_helper_##name(cpu_env, rt, rs, i32);       \
+    rt = gen_fprp_ptr(tcg_ctx, rD(ctx->opcode));            \
+    rs = gen_fprp_ptr(tcg_ctx, fprfld(ctx->opcode));        \
+    i32 = tcg_const_i32(tcg_ctx, i32fld(ctx->opcode));      \
+    gen_helper_##name(tcg_ctx, tcg_ctx->cpu_env, rt, rs, i32);       \
     if (unlikely(Rc(ctx->opcode) != 0)) {          \
         gen_set_cr1_from_fpscr(ctx);               \
     }                                              \
-    tcg_temp_free_ptr(rt);                         \
-    tcg_temp_free_ptr(rs);                         \
-    tcg_temp_free_i32(i32);                        \
+    tcg_temp_free_ptr(tcg_ctx, rt);                         \
+    tcg_temp_free_ptr(tcg_ctx, rs);                         \
+    tcg_temp_free_i32(tcg_ctx, i32);                        \
 }
 
 GEN_DFP_T_A_B_Rc(dadd)

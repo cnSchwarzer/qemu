@@ -26,12 +26,9 @@ struct arm_boot_info;
 
 #define TYPE_ARM_CPU "arm-cpu"
 
-#define ARM_CPU_CLASS(klass) \
-    OBJECT_CLASS_CHECK(ARMCPUClass, (klass), TYPE_ARM_CPU)
-#define ARM_CPU(obj) \
-    OBJECT_CHECK(ARMCPU, (obj), TYPE_ARM_CPU)
-#define ARM_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(ARMCPUClass, (obj), TYPE_ARM_CPU)
+#define ARM_CPU(obj) ((ARMCPU *)obj)
+#define ARM_CPU_CLASS(klass) ((ARMCPUClass *)klass)
+#define ARM_CPU_GET_CLASS(obj) (&((ARMCPU *)obj)->cc)
 
 #define TYPE_ARM_MAX_CPU "max-" TYPE_ARM_CPU
 
@@ -39,7 +36,6 @@ typedef struct ARMCPUInfo ARMCPUInfo;
 
 /**
  * ARMCPUClass:
- * @parent_realize: The parent class' realize handler.
  * @parent_reset: The parent class' reset handler.
  *
  * An ARM CPU model.
@@ -50,8 +46,7 @@ typedef struct ARMCPUClass {
     /*< public >*/
 
     const ARMCPUInfo *info;
-    DeviceRealize parent_realize;
-    DeviceReset parent_reset;
+    void (*parent_reset)(CPUState *cpu);
 } ARMCPUClass;
 
 typedef struct ARMCPU ARMCPU;
@@ -69,7 +64,6 @@ typedef struct AArch64CPUClass {
 } AArch64CPUClass;
 
 void register_cp_regs_for_features(ARMCPU *cpu);
-void init_cpreg_list(ARMCPU *cpu);
 
 /* Callback functions for the generic timer's timers. */
 void arm_gt_ptimer_cb(void *opaque);

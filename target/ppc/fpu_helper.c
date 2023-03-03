@@ -38,11 +38,7 @@ static inline float128 float128_snan_to_qnan(float128 x)
 
 static inline bool fp_exceptions_enabled(CPUPPCState *env)
 {
-#ifdef CONFIG_USER_ONLY
-    return true;
-#else
     return (env->msr & ((1U << MSR_FE0) | (1U << MSR_FE1))) != 0;
-#endif
 }
 
 /*****************************************************************************/
@@ -148,7 +144,7 @@ static int tp##_classify(tp arg)                               \
 {                                                              \
     int ret = tp##_is_neg(arg) * is_neg;                       \
     if (unlikely(tp##_is_any_nan(arg))) {                      \
-        float_status dummy = { };  /* snan_bit_is_one = 0 */   \
+        float_status dummy = { 0 };  /* snan_bit_is_one = 0 */ \
         ret |= (tp##_is_signaling_nan(arg, &dummy)             \
                 ? is_snan : is_qnan);                          \
     } else if (unlikely(tp##_is_infinity(arg))) {              \
@@ -462,7 +458,7 @@ void helper_fpscr_setbit(CPUPPCState *env, uint32_t bit)
     int prev;
 
     prev = (env->fpscr >> bit) & 1;
-    env->fpscr |= 1 << bit;
+    env->fpscr |= 1ULL << bit;
     if (prev == 0) {
         switch (bit) {
         case FPSCR_VX:
@@ -2830,7 +2826,7 @@ VSX_CVT_FP_TO_FP_VECTOR(xscvdpqp, 1, float64, float128, VsrD(0), f128, 1)
 #define VSX_CVT_FP_TO_FP_HP(op, nels, stp, ttp, sfld, tfld, sfprf) \
 void helper_##op(CPUPPCState *env, ppc_vsr_t *xt, ppc_vsr_t *xb)   \
 {                                                                  \
-    ppc_vsr_t t = { };                                             \
+    ppc_vsr_t t = { 0 };                                           \
     int i;                                                         \
                                                                    \
     for (i = 0; i < nels; i++) {                                   \
@@ -2861,7 +2857,7 @@ VSX_CVT_FP_TO_FP_HP(xvcvhpsp, 4, float16, float32, VsrH(2 * i + 1), VsrW(i), 0)
 void helper_xscvqpdp(CPUPPCState *env, uint32_t opcode,
                      ppc_vsr_t *xt, ppc_vsr_t *xb)
 {
-    ppc_vsr_t t = { };
+    ppc_vsr_t t = { 0 };
     float_status tstat;
 
     tstat = env->fp_status;
@@ -2993,7 +2989,7 @@ VSX_CVT_FP_TO_INT(xvcvspuxws, 4, float32, uint32, VsrW(i), VsrW(i), 0U)
 void helper_##op(CPUPPCState *env, uint32_t opcode,                          \
                  ppc_vsr_t *xt, ppc_vsr_t *xb)                               \
 {                                                                            \
-    ppc_vsr_t t = { };                                                       \
+    ppc_vsr_t t = { 0 };                                                     \
                                                                              \
     t.tfld = stp##_to_##ttp##_round_to_zero(xb->sfld, &env->fp_status);      \
     if (env->fp_status.float_exception_flags & float_flag_invalid) {         \
@@ -3186,7 +3182,7 @@ VSX_XXPERM(xxpermr, 1)
 
 void helper_xvxsigsp(CPUPPCState *env, ppc_vsr_t *xt, ppc_vsr_t *xb)
 {
-    ppc_vsr_t t = { };
+    ppc_vsr_t t = { 0 };
     uint32_t exp, i, fraction;
 
     for (i = 0; i < 4; i++) {
@@ -3217,7 +3213,7 @@ void helper_##op(CPUPPCState *env, uint32_t opcode)         \
 {                                                           \
     ppc_vsr_t *xt = &env->vsr[xT(opcode)];                  \
     ppc_vsr_t *xb = &env->vsr[xbn];                         \
-    ppc_vsr_t t = { };                                      \
+    ppc_vsr_t t = { 0 };                                    \
     uint32_t i, sign, dcmx;                                 \
     uint32_t cc, match = 0;                                 \
                                                             \
@@ -3294,7 +3290,7 @@ void helper_xststdcsp(CPUPPCState *env, uint32_t opcode, ppc_vsr_t *xb)
 void helper_xsrqpi(CPUPPCState *env, uint32_t opcode,
                    ppc_vsr_t *xt, ppc_vsr_t *xb)
 {
-    ppc_vsr_t t = { };
+    ppc_vsr_t t = { 0 };
     uint8_t r = Rrm(opcode);
     uint8_t ex = Rc(opcode);
     uint8_t rmc = RMC(opcode);
@@ -3351,7 +3347,7 @@ void helper_xsrqpi(CPUPPCState *env, uint32_t opcode,
 void helper_xsrqpxp(CPUPPCState *env, uint32_t opcode,
                     ppc_vsr_t *xt, ppc_vsr_t *xb)
 {
-    ppc_vsr_t t = { };
+    ppc_vsr_t t = { 0 };
     uint8_t r = Rrm(opcode);
     uint8_t rmc = RMC(opcode);
     uint8_t rmode = 0;
@@ -3405,7 +3401,7 @@ void helper_xsrqpxp(CPUPPCState *env, uint32_t opcode,
 void helper_xssqrtqp(CPUPPCState *env, uint32_t opcode,
                      ppc_vsr_t *xt, ppc_vsr_t *xb)
 {
-    ppc_vsr_t t = { };
+    ppc_vsr_t t = { 0 };
     float_status tstat;
 
     helper_reset_fpstatus(env);

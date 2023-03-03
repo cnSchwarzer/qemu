@@ -50,14 +50,14 @@ void helper_debug(CPUSPARCState *env)
 #ifdef TARGET_SPARC64
 void helper_tick_set_count(void *opaque, uint64_t count)
 {
-#if !defined(CONFIG_USER_ONLY)
-    cpu_tick_set_count(opaque, count);
-#endif
+    // cpu_tick_set_count(opaque, count);
 }
 
 uint64_t helper_tick_get_count(CPUSPARCState *env, void *opaque, int mem_idx)
 {
-#if !defined(CONFIG_USER_ONLY)
+    return 0;
+
+#if 0
     CPUTimer *timer = opaque;
 
     if (timer->npt && mem_idx < MMU_KERNEL_IDX) {
@@ -65,18 +65,12 @@ uint64_t helper_tick_get_count(CPUSPARCState *env, void *opaque, int mem_idx)
     }
 
     return cpu_tick_get_count(timer);
-#else
-    /* In user-mode, QEMU_CLOCK_VIRTUAL doesn't exist.
-       Just pass through the host cpu clock ticks.  */
-    return cpu_get_host_ticks();
 #endif
 }
 
 void helper_tick_set_limit(void *opaque, uint64_t limit)
 {
-#if !defined(CONFIG_USER_ONLY)
-    cpu_tick_set_limit(opaque, limit);
-#endif
+    // cpu_tick_set_limit(opaque, limit);
 }
 #endif
 

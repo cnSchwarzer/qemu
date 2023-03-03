@@ -19,24 +19,15 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
-#include "cpu.h"
-#include "trace.h"
-#include "disas/disas.h"
+#include "hw/core/cpu.h"
 #include "exec/exec-all.h"
 #include "tcg/tcg.h"
 #include "qemu/atomic.h"
-#include "sysemu/qtest.h"
 #include "qemu/timer.h"
-#include "qemu/rcu.h"
 #include "exec/tb-hash.h"
 #include "exec/tb-lookup.h"
-#include "exec/log.h"
-#include "qemu/main-loop.h"
-#if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)
-#include "hw/i386/apic.h"
-#endif
 #include "sysemu/cpus.h"
-#include "sysemu/replay.h"
+#include "uc_priv.h"
 
 /* -icount align implementation. */
 
@@ -46,7 +37,6 @@ typedef struct SyncClocks {
     int64_t realtime_clock;
 } SyncClocks;
 
-#if !defined(CONFIG_USER_ONLY)
 /* Allow the guest to have a max 3ms advance.
  * The difference between the 2 clocks could therefore
  * oscillate around 0.
@@ -55,87 +45,6 @@ typedef struct SyncClocks {
 #define THRESHOLD_REDUCE 1.5
 #define MAX_DELAY_PRINT_RATE 2000000000LL
 #define MAX_NB_PRINTS 100
-
-static void align_clocks(SyncClocks *sc, CPUState *cpu)
-{
-    int64_t cpu_icount;
-
-    if (!icount_align_option) {
-        return;
-    }
-
-    cpu_icount = cpu->icount_extra + cpu_neg(cpu)->icount_decr.u16.low;
-    sc->diff_clk += cpu_icount_to_ns(sc->last_cpu_icount - cpu_icount);
-    sc->last_cpu_icount = cpu_icount;
-
-    if (sc->diff_clk > VM_CLOCK_ADVANCE) {
-#ifndef _WIN32
-        struct timespec sleep_delay, rem_delay;
-        sleep_delay.tv_sec = sc->diff_clk / 1000000000LL;
-        sleep_delay.tv_nsec = sc->diff_clk % 1000000000LL;
-        if (nanosleep(&sleep_delay, &rem_delay) < 0) {
-            sc->diff_clk = rem_delay.tv_sec * 1000000000LL + rem_delay.tv_nsec;
-        } else {
-            sc->diff_clk = 0;
-        }
-#else
-        Sleep(sc->diff_clk / SCALE_MS);
-        sc->diff_clk = 0;
-#endif
-    }
-}
-
-static void print_delay(const SyncClocks *sc)
-{
-    static float threshold_delay;
-    static int64_t last_realtime_clock;
-    static int nb_prints;
-
-    if (icount_align_option &&
-        sc->realtime_clock - last_realtime_clock >= MAX_DELAY_PRINT_RATE &&
-        nb_prints < MAX_NB_PRINTS) {
-        if ((-sc->diff_clk / (float)1000000000LL > threshold_delay) ||
-            (-sc->diff_clk / (float)1000000000LL <
-             (threshold_delay - THRESHOLD_REDUCE))) {
-            threshold_delay = (-sc->diff_clk / 1000000000LL) + 1;
-            printf("Warning: The guest is now late by %.1f to %.1f seconds\n",
-                   threshold_delay - 1,
-                   threshold_delay);
-            nb_prints++;
-            last_realtime_clock = sc->realtime_clock;
-        }
-    }
-}
-
-static void init_delay_params(SyncClocks *sc, CPUState *cpu)
-{
-    if (!icount_align_option) {
-        return;
-    }
-    sc->realtime_clock = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL_RT);
-    sc->diff_clk = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - sc->realtime_clock;
-    sc->last_cpu_icount
-        = cpu->icount_extra + cpu_neg(cpu)->icount_decr.u16.low;
-    if (sc->diff_clk < max_delay) {
-        max_delay = sc->diff_clk;
-    }
-    if (sc->diff_clk > max_advance) {
-        max_advance = sc->diff_clk;
-    }
-
-    /* Print every 2s max if the guest is late. We limit the number
-       of printed messages to NB_PRINT_MAX(currently 100) */
-    print_delay(sc);
-}
-#else
-static void align_clocks(SyncClocks *sc, const CPUState *cpu)
-{
-}
-
-static void init_delay_params(SyncClocks *sc, const CPUState *cpu)
-{
-}
-#endif /* CONFIG USER ONLY */
 
 /* Execute a TB, and fix up the CPU state afterwards if necessary */
 static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
@@ -146,34 +55,16 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
     int tb_exit;
     uint8_t *tb_ptr = itb->tc.ptr;
 
-    qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
-                           "Trace %d: %p ["
-                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
-                           cpu->cpu_index, itb->tc.ptr,
-                           itb->cs_base, itb->pc, itb->flags,
-                           lookup_symbol(itb->pc));
-
-#if defined(DEBUG_DISAS)
-    if (qemu_loglevel_mask(CPU_LOG_TB_CPU)
-        && qemu_log_in_addr_range(itb->pc)) {
-        FILE *logfile = qemu_log_lock();
-        int flags = 0;
-        if (qemu_loglevel_mask(CPU_LOG_TB_FPU)) {
-            flags |= CPU_DUMP_FPU;
-        }
-#if defined(TARGET_I386)
-        flags |= CPU_DUMP_CCOP;
-#endif
-        log_cpu_state(cpu, flags);
-        qemu_log_unlock(logfile);
-    }
-#endif /* DEBUG_DISAS */
-
+    UC_TRACE_START(UC_TRACE_TB_EXEC);
+    tb_exec_lock(cpu->uc->tcg_ctx);
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    tb_exec_unlock(cpu->uc->tcg_ctx);
+    UC_TRACE_END(UC_TRACE_TB_EXEC, "[uc] exec tb 0x%" PRIx64 ": ", itb->pc);
+
     cpu->can_do_io = 1;
     last_tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);
     tb_exit = ret & TB_EXIT_MASK;
-    trace_exec_tb_exit(last_tb, tb_exit);
+    // trace_exec_tb_exit(last_tb, tb_exit);
 
     if (tb_exit > TB_EXIT_IDX1) {
         /* We didn't start executing this TB (eg because the instruction
@@ -181,22 +72,37 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
          * of the start of the TB.
          */
         CPUClass *cc = CPU_GET_CLASS(cpu);
-        qemu_log_mask_and_addr(CPU_LOG_EXEC, last_tb->pc,
-                               "Stopped execution of TB chain before %p ["
-                               TARGET_FMT_lx "] %s\n",
-                               last_tb->tc.ptr, last_tb->pc,
-                               lookup_symbol(last_tb->pc));
-        if (cc->synchronize_from_tb) {
-            cc->synchronize_from_tb(cpu, last_tb);
-        } else {
-            assert(cc->set_pc);
-            cc->set_pc(cpu, last_tb->pc);
+        if (!HOOK_EXISTS(env->uc, UC_HOOK_CODE)) {
+            // We should sync pc for R/W error.
+            switch (env->uc->invalid_error) {
+                case UC_ERR_WRITE_PROT:
+                case UC_ERR_READ_PROT:
+                case UC_ERR_FETCH_PROT:
+                case UC_ERR_WRITE_UNMAPPED:
+                case UC_ERR_READ_UNMAPPED:
+                case UC_ERR_FETCH_UNMAPPED:
+                case UC_ERR_WRITE_UNALIGNED:
+                case UC_ERR_READ_UNALIGNED:
+                case UC_ERR_FETCH_UNALIGNED:
+                    break;
+                default:
+                    // If we receive a quit request, users has sync-ed PC themselves.
+                    if (!cpu->uc->quit_request) {
+                        if (cc->synchronize_from_tb) {
+                            cc->synchronize_from_tb(cpu, last_tb);
+                        } else {
+                            assert(cc->set_pc);
+                            cc->set_pc(cpu, last_tb->pc);
+                        }
+                    }
+            }
         }
+
+        cpu->tcg_exit_req = 0;
     }
     return ret;
 }
 
-#ifndef CONFIG_USER_ONLY
 /* Execute the code without caching the generated code. An interpreter
    could be used if available. */
 static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
@@ -220,66 +126,12 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
     mmap_unlock();
 
     /* execute the generated code */
-    trace_exec_tb_nocache(tb, tb->pc);
     cpu_tb_exec(cpu, tb);
 
     mmap_lock();
-    tb_phys_invalidate(tb, -1);
+    tb_phys_invalidate(cpu->uc->tcg_ctx, tb, -1);
     mmap_unlock();
-    tcg_tb_remove(tb);
-}
-#endif
-
-void cpu_exec_step_atomic(CPUState *cpu)
-{
-    CPUClass *cc = CPU_GET_CLASS(cpu);
-    TranslationBlock *tb;
-    target_ulong cs_base, pc;
-    uint32_t flags;
-    uint32_t cflags = 1;
-    uint32_t cf_mask = cflags & CF_HASH_MASK;
-
-    if (sigsetjmp(cpu->jmp_env, 0) == 0) {
-        start_exclusive();
-
-        tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, cf_mask);
-        if (tb == NULL) {
-            mmap_lock();
-            tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
-            mmap_unlock();
-        }
-
-        /* Since we got here, we know that parallel_cpus must be true.  */
-        parallel_cpus = false;
-        cc->cpu_exec_enter(cpu);
-        /* execute the generated code */
-        trace_exec_tb(tb, pc);
-        cpu_tb_exec(cpu, tb);
-        cc->cpu_exec_exit(cpu);
-    } else {
-        /*
-         * The mmap_lock is dropped by tb_gen_code if it runs out of
-         * memory.
-         */
-#ifndef CONFIG_SOFTMMU
-        tcg_debug_assert(!have_mmap_lock());
-#endif
-        if (qemu_mutex_iothread_locked()) {
-            qemu_mutex_unlock_iothread();
-        }
-        assert_no_pages_locked();
-        qemu_plugin_disable_mem_helpers(cpu);
-    }
-
-
-    /*
-     * As we start the exclusive region before codegen we must still
-     * be in the region if we longjump out of either the codegen or
-     * the execution.
-     */
-    g_assert(cpu_in_exclusive_context(cpu));
-    parallel_cpus = true;
-    end_exclusive();
+    tcg_tb_remove(cpu->uc->tcg_ctx, tb);
 }
 
 struct tb_desc {
@@ -292,7 +144,7 @@ struct tb_desc {
     uint32_t trace_vcpu_dstate;
 };
 
-static bool tb_lookup_cmp(const void *p, const void *d)
+static bool tb_lookup_cmp(struct uc_struct *uc, const void *p, const void *d)
 {
     const TranslationBlock *tb = p;
     const struct tb_desc *desc = d;
@@ -324,6 +176,7 @@ TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
                                    target_ulong cs_base, uint32_t flags,
                                    uint32_t cf_mask)
 {
+    struct uc_struct *uc = cpu->uc;
     tb_page_addr_t phys_pc;
     struct tb_desc desc;
     uint32_t h;
@@ -340,7 +193,7 @@ TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
     }
     desc.phys_page1 = phys_pc & TARGET_PAGE_MASK;
     h = tb_hash_func(phys_pc, pc, flags, cf_mask, *cpu->trace_dstate);
-    return qht_lookup_custom(&tb_ctx.htable, &desc, h, tb_lookup_cmp);
+    return qht_lookup_custom(uc, &cpu->uc->tcg_ctx->tb_ctx.htable, &desc, h, tb_lookup_cmp);
 }
 
 void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr)
@@ -360,14 +213,17 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
     uintptr_t old;
 
     assert(n < ARRAY_SIZE(tb->jmp_list_next));
-    qemu_spin_lock(&tb_next->jmp_lock);
 
     /* make sure the destination TB is valid */
     if (tb_next->cflags & CF_INVALID) {
         goto out_unlock_next;
     }
     /* Atomically claim the jump destination slot only if it was NULL */
+#ifdef _MSC_VER
+    old = atomic_cmpxchg((long *)&tb->jmp_dest[n], (uintptr_t)NULL, (uintptr_t)tb_next);
+#else
     old = atomic_cmpxchg(&tb->jmp_dest[n], (uintptr_t)NULL, (uintptr_t)tb_next);
+#endif
     if (old) {
         goto out_unlock_next;
     }
@@ -379,17 +235,9 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
     tb->jmp_list_next[n] = tb_next->jmp_list_head;
     tb_next->jmp_list_head = (uintptr_t)tb | n;
 
-    qemu_spin_unlock(&tb_next->jmp_lock);
-
-    qemu_log_mask_and_addr(CPU_LOG_EXEC, tb->pc,
-                           "Linking TBs %p [" TARGET_FMT_lx
-                           "] index %d -> %p [" TARGET_FMT_lx "]\n",
-                           tb->tc.ptr, tb->pc, n,
-                           tb_next->tc.ptr, tb_next->pc);
     return;
 
  out_unlock_next:
-    qemu_spin_unlock(&tb_next->jmp_lock);
     return;
 }
 
@@ -400,6 +248,10 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     TranslationBlock *tb;
     target_ulong cs_base, pc;
     uint32_t flags;
+    uc_tb cur_tb, prev_tb;
+    uc_engine *uc = cpu->uc;
+    struct list_item *cur;
+    struct hook *hook;
 
     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, cf_mask);
     if (tb == NULL) {
@@ -407,9 +259,23 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
         tb = tb_gen_code(cpu, pc, cs_base, flags, cf_mask);
         mmap_unlock();
         /* We add the TB in the virtual pc hash table for the fast lookup */
-        atomic_set(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)], tb);
+        cpu->tb_jmp_cache[tb_jmp_cache_hash_func(cpu->uc, pc)] = tb;
+
+        if (uc->last_tb) {
+            UC_TB_COPY(&cur_tb, tb);
+            UC_TB_COPY(&prev_tb, uc->last_tb);
+            for (cur = uc->hook[UC_HOOK_EDGE_GENERATED_IDX].head;
+                cur != NULL && (hook = (struct hook *)cur->data); cur = cur->next) {
+                if (hook->to_delete) {
+                    continue;
+                }
+
+                if (HOOK_BOUND_CHECK(hook, (uint64_t)tb->pc)) {
+                    ((uc_hook_edge_gen_t)hook->callback)(uc, &cur_tb, &prev_tb, hook->user_data);
+                }
+            }
+        }
     }
-#ifndef CONFIG_USER_ONLY
     /* We don't take care of direct jumps when address mapping changes in
      * system emulation. So it's not safe to make a direct jump to a TB
      * spanning two pages because the mapping for the second page can change.
@@ -417,26 +283,26 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     if (tb->page_addr[1] != -1) {
         last_tb = NULL;
     }
-#endif
     /* See if we can patch the calling TB. */
     if (last_tb) {
         tb_add_jump(last_tb, tb_exit, tb);
     }
+
     return tb;
 }
 
 static inline bool cpu_handle_halt(CPUState *cpu)
 {
     if (cpu->halted) {
-#if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)
+#if 0
+#if defined(TARGET_I386)
         if ((cpu->interrupt_request & CPU_INTERRUPT_POLL)
             && replay_interrupt()) {
             X86CPU *x86_cpu = X86_CPU(cpu);
-            qemu_mutex_lock_iothread();
             apic_poll_irq(x86_cpu->apic_state);
             cpu_reset_interrupt(cpu, CPU_INTERRUPT_POLL);
-            qemu_mutex_unlock_iothread();
         }
+#endif
 #endif
         if (!cpu_has_work(cpu)) {
             return true;
@@ -464,17 +330,36 @@ static inline void cpu_handle_debug_exception(CPUState *cpu)
 
 static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
 {
+    bool catched = false;
+    struct uc_struct *uc = cpu->uc;
+    struct hook *hook;
+
+    // printf(">> exception index = %u\n", cpu->exception_index); qq
+
+    if (cpu->uc->stop_interrupt && cpu->uc->stop_interrupt(cpu->uc, cpu->exception_index)) {
+        // Unicorn: call registered invalid instruction callbacks
+        catched = false;
+        HOOK_FOREACH_VAR_DECLARE;
+        HOOK_FOREACH(uc, hook, UC_HOOK_INSN_INVALID) {
+            if (hook->to_delete) {
+                continue;
+            }
+            catched = ((uc_cb_hookinsn_invalid_t)hook->callback)(uc, hook->user_data);
+            if (catched) {
+                break;
+            }
+        }
+        if (!catched) {
+            uc->invalid_error = UC_ERR_INSN_INVALID;
+        }
+
+        // we want to stop emulation
+        *ret = EXCP_HLT;
+        return true;
+    }
+
     if (cpu->exception_index < 0) {
-#ifndef CONFIG_USER_ONLY
-        if (replay_has_exception()
-            && cpu_neg(cpu)->icount_decr.u16.low + cpu->icount_extra == 0) {
-            /* try to cause an exception pending in the log */
-            cpu_exec_nocache(cpu, 1, tb_find(cpu, NULL, 0, curr_cflags()), true);
-        }
-#endif
-        if (cpu->exception_index < 0) {
-            return false;
-        }
+        return false;
     }
 
     if (cpu->exception_index >= EXCP_INTERRUPT) {
@@ -486,32 +371,49 @@ static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
         cpu->exception_index = -1;
         return true;
     } else {
-#if defined(CONFIG_USER_ONLY)
-        /* if user mode only, we simulate a fake exception
-           which will be handled outside the cpu execution
-           loop */
-#if defined(TARGET_I386)
-        CPUClass *cc = CPU_GET_CLASS(cpu);
-        cc->do_interrupt(cpu);
-#endif
-        *ret = cpu->exception_index;
-        cpu->exception_index = -1;
-        return true;
-#else
-        if (replay_exception()) {
-            CPUClass *cc = CPU_GET_CLASS(cpu);
-            qemu_mutex_lock_iothread();
-            cc->do_interrupt(cpu);
-            qemu_mutex_unlock_iothread();
-            cpu->exception_index = -1;
-        } else if (!replay_has_interrupt()) {
-            /* give a chance to iothread in replay mode */
-            *ret = EXCP_INTERRUPT;
-            return true;
+#if defined(TARGET_X86_64)
+        CPUArchState *env = cpu->env_ptr;
+        if (env->exception_is_int) {
+            // point EIP to the next instruction after INT
+            env->eip = env->exception_next_eip;
         }
 #endif
+#if defined(TARGET_MIPS) || defined(TARGET_MIPS64)
+        // Unicorn: Imported from https://github.com/unicorn-engine/unicorn/pull/1098
+        CPUMIPSState *env = &(MIPS_CPU(cpu)->env);
+        env->active_tc.PC = uc->next_pc;
+#endif
+#if defined(TARGET_RISCV)
+        CPURISCVState *env = &(RISCV_CPU(uc->cpu)->env);
+        env->pc += 4;
+#endif
+#if defined(TARGET_PPC)
+        CPUPPCState *env = &(POWERPC_CPU(uc->cpu)->env);
+        env->nip += 4;
+#endif
+        // Unicorn: call registered interrupt callbacks
+        catched = false;
+        HOOK_FOREACH_VAR_DECLARE;
+        HOOK_FOREACH(uc, hook, UC_HOOK_INTR) {
+            if (hook->to_delete) {
+                continue;
+            }
+            ((uc_cb_hookintr_t)hook->callback)(uc, cpu->exception_index, hook->user_data);
+            catched = true;
+        }
+        // Unicorn: If un-catched interrupt, stop executions.
+        if (!catched) {
+            // printf("AAAAAAAAAAAA\n"); qq
+            uc->invalid_error = UC_ERR_EXCEPTION;
+            cpu->halted = 1;
+            *ret = EXCP_HLT;
+            return true;
+        }
+
+        cpu->exception_index = -1;
     }
 
+    *ret = EXCP_INTERRUPT;
     return false;
 }
 
@@ -525,11 +427,10 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
      * Ensure zeroing happens before reading cpu->exit_request or
      * cpu->interrupt_request (see also smp_wmb in cpu_exit())
      */
-    atomic_mb_set(&cpu_neg(cpu)->icount_decr.u16.high, 0);
+    cpu_neg(cpu)->icount_decr.u16.high = 0;
 
-    if (unlikely(atomic_read(&cpu->interrupt_request))) {
+    if (unlikely(cpu->interrupt_request)) {
         int interrupt_request;
-        qemu_mutex_lock_iothread();
         interrupt_request = cpu->interrupt_request;
         if (unlikely(cpu->singlestep_enabled & SSTEP_NOIRQ)) {
             /* Mask out external interrupts for this step. */
@@ -538,35 +439,22 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
         if (interrupt_request & CPU_INTERRUPT_DEBUG) {
             cpu->interrupt_request &= ~CPU_INTERRUPT_DEBUG;
             cpu->exception_index = EXCP_DEBUG;
-            qemu_mutex_unlock_iothread();
-            return true;
-        }
-        if (replay_mode == REPLAY_MODE_PLAY && !replay_has_interrupt()) {
-            /* Do nothing */
-        } else if (interrupt_request & CPU_INTERRUPT_HALT) {
-            replay_interrupt();
-            cpu->interrupt_request &= ~CPU_INTERRUPT_HALT;
-            cpu->halted = 1;
-            cpu->exception_index = EXCP_HLT;
-            qemu_mutex_unlock_iothread();
             return true;
         }
 #if defined(TARGET_I386)
         else if (interrupt_request & CPU_INTERRUPT_INIT) {
             X86CPU *x86_cpu = X86_CPU(cpu);
             CPUArchState *env = &x86_cpu->env;
-            replay_interrupt();
+            //replay_interrupt();
             cpu_svm_check_intercept_param(env, SVM_EXIT_INIT, 0, 0);
             do_cpu_init(x86_cpu);
             cpu->exception_index = EXCP_HALTED;
-            qemu_mutex_unlock_iothread();
             return true;
         }
 #else
         else if (interrupt_request & CPU_INTERRUPT_RESET) {
-            replay_interrupt();
+            //replay_interrupt();
             cpu_reset(cpu);
-            qemu_mutex_unlock_iothread();
             return true;
         }
 #endif
@@ -576,7 +464,7 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
            and via longjmp via cpu_loop_exit.  */
         else {
             if (cc->cpu_exec_interrupt(cpu, interrupt_request)) {
-                replay_interrupt();
+                //replay_interrupt();
                 cpu->exception_index = -1;
                 *last_tb = NULL;
             }
@@ -590,16 +478,11 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
                the program flow was changed */
             *last_tb = NULL;
         }
-
-        /* If we exit via cpu_loop_exit/longjmp it is reset in cpu_exec */
-        qemu_mutex_unlock_iothread();
     }
 
     /* Finally, check if we need to exit to the main loop.  */
-    if (unlikely(atomic_read(&cpu->exit_request))
-        || (use_icount
-            && cpu_neg(cpu)->icount_decr.u16.low + cpu->icount_extra == 0)) {
-        atomic_set(&cpu->exit_request, 0);
+    if (unlikely(cpu->exit_request)) {
+        cpu->exit_request = 0;
         if (cpu->exception_index == -1) {
             cpu->exception_index = EXCP_INTERRUPT;
         }
@@ -615,8 +498,9 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     uintptr_t ret;
     int32_t insns_left;
 
-    trace_exec_tb(tb, tb->pc);
+    // trace_exec_tb(tb, tb->pc);
     ret = cpu_tb_exec(cpu, tb);
+    cpu->uc->last_tb = tb; // Trace the last tb we executed.
     tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);
     *tb_exit = ret & TB_EXIT_MASK;
     if (*tb_exit != TB_EXIT_REQUESTED) {
@@ -625,7 +509,7 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     }
 
     *last_tb = NULL;
-    insns_left = atomic_read(&cpu_neg(cpu)->icount_decr.u32);
+    insns_left = cpu_neg(cpu)->icount_decr.u32;
     if (insns_left < 0) {
         /* Something asked us to stop executing chained TBs; just
          * continue round the main loop. Whatever requested the exit
@@ -638,10 +522,6 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     }
 
     /* Instruction counter expired.  */
-    assert(use_icount);
-#ifndef CONFIG_USER_ONLY
-    /* Ensure global icount has gone forward */
-    cpu_update_icount(cpu);
     /* Refill decrementer and continue execution.  */
     insns_left = MIN(0xffff, cpu->icount_budget);
     cpu_neg(cpu)->icount_decr.u16.low = insns_left;
@@ -654,25 +534,20 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
             cpu_exec_nocache(cpu, insns_left, tb, false);
         }
     }
-#endif
 }
 
 /* main execution loop */
-
-int cpu_exec(CPUState *cpu)
+int cpu_exec(struct uc_struct *uc, CPUState *cpu)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);
     int ret;
-    SyncClocks sc = { 0 };
-
-    /* replay_interrupt may need current_cpu */
-    current_cpu = cpu;
+    // SyncClocks sc = { 0 };
 
     if (cpu_handle_halt(cpu)) {
         return EXCP_HALTED;
     }
 
-    rcu_read_lock();
+    // rcu_read_lock();
 
     cc->cpu_exec_enter(cpu);
 
@@ -681,29 +556,23 @@ int cpu_exec(CPUState *cpu)
      * what we have to do is sleep until it is 0. As for the
      * advance/delay we gain here, we try to fix it next time.
      */
-    init_delay_params(&sc, cpu);
+    // init_delay_params(&sc, cpu);
 
+    // Unicorn: We would like to support nested uc_emu_start calls.
     /* prepare setjmp context for exception handling */
-    if (sigsetjmp(cpu->jmp_env, 0) != 0) {
+    // if (sigsetjmp(cpu->jmp_env, 0) != 0) {
+    if (sigsetjmp(uc->jmp_bufs[uc->nested_level - 1], 0) != 0) {
 #if defined(__clang__) || !QEMU_GNUC_PREREQ(4, 6)
         /* Some compilers wrongly smash all local variables after
          * siglongjmp. There were bug reports for gcc 4.5.0 and clang.
          * Reload essential local variables here for those compilers.
          * Newer versions of gcc would complain about this code (-Wclobbered). */
-        cpu = current_cpu;
         cc = CPU_GET_CLASS(cpu);
 #else /* buggy compiler */
         /* Assert that the compiler does not smash local variables. */
-        g_assert(cpu == current_cpu);
+        // g_assert(cpu == current_cpu);
         g_assert(cc == CPU_GET_CLASS(cpu));
 #endif /* buggy compiler */
-#ifndef CONFIG_SOFTMMU
-        tcg_debug_assert(!have_mmap_lock());
-#endif
-        if (qemu_mutex_iothread_locked()) {
-            qemu_mutex_unlock_iothread();
-        }
-        qemu_plugin_disable_mem_helpers(cpu);
 
         assert_no_pages_locked();
     }
@@ -729,15 +598,21 @@ int cpu_exec(CPUState *cpu)
             }
 
             tb = tb_find(cpu, last_tb, tb_exit, cflags);
+            if (unlikely(cpu->exit_request)) {
+                continue;
+            }
             cpu_loop_exec_tb(cpu, tb, &last_tb, &tb_exit);
             /* Try to align the host and virtual clocks
                if the guest is in advance */
-            align_clocks(&sc, cpu);
+            // align_clocks(&sc, cpu);
         }
     }
 
+    // Unicorn: Clear any TCG exit flag that might have been left set by exit requests
+    uc->cpu->tcg_exit_req = 0;
+
     cc->cpu_exec_exit(cpu);
-    rcu_read_unlock();
+    // rcu_read_unlock();
 
     return ret;
 }

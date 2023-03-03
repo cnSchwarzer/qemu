@@ -1083,6 +1083,9 @@ QEMU_BUILD_BUG_ON(TLB_MASK_TABLE_OFS(0) < -(1 << 12));
 static TCGReg tcg_out_tlb_load(TCGContext *s, TCGReg addr, int mem_index,
                                MemOp opc, int which)
 {
+#ifdef TARGET_ARM
+    struct uc_struct *uc = s->uc;
+#endif
     int fast_off = TLB_MASK_TABLE_OFS(mem_index);
     int mask_off = fast_off + offsetof(CPUTLBDescFast, mask);
     int table_off = fast_off + offsetof(CPUTLBDescFast, table);
@@ -1753,25 +1756,25 @@ static void tcg_target_init(TCGContext *s)
     }
 #endif
 
-    tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffff;
-    tcg_target_available_regs[TCG_TYPE_I64] = ALL_64;
+    s->tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffff;
+    s->tcg_target_available_regs[TCG_TYPE_I64] = ALL_64;
 
-    tcg_target_call_clobber_regs = 0;
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_G1);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_G2);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_G3);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_G4);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_G5);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_G6);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_G7);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O0);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O1);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O2);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O3);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O4);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O5);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O6);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_O7);
+    s->tcg_target_call_clobber_regs = 0;
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_G1);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_G2);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_G3);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_G4);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_G5);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_G6);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_G7);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O0);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O1);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O2);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O3);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O4);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O5);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O6);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_O7);
 
     s->reserved_regs = 0;
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_G0); /* zero */
@@ -1821,9 +1824,9 @@ static const DebugFrame debug_frame = {
     .fde_ret_save = { 9, 15, 31 },      /* DW_CFA_register o7, i7 */
 };
 
-void tcg_register_jit(void *buf, size_t buf_size)
+void tcg_register_jit(TCGContext *s, void *buf, size_t buf_size)
 {
-    tcg_register_jit_int(buf, buf_size, &debug_frame, sizeof(debug_frame));
+    tcg_register_jit_int(s, buf, buf_size, &debug_frame, sizeof(debug_frame));
 }
 
 void tb_target_set_jmp_target(uintptr_t tc_ptr, uintptr_t jmp_addr,

@@ -20,15 +20,411 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "cpu.h"
-#include "qemu/main-loop.h"
 #include "exec/exec-all.h"
 
-/* CSR function table */
-static riscv_csr_operations csr_ops[];
+static int fs(CPURISCVState *env, int csrno);
+static int read_fflags(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_fflags(CPURISCVState *env, int csrno, target_ulong val);
+static int read_frm(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_frm(CPURISCVState *env, int csrno, target_ulong val);
+static int read_fcsr(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_fcsr(CPURISCVState *env, int csrno, target_ulong val);
+static int ctr(CPURISCVState *env, int csrno);
+static int read_instret(CPURISCVState *env, int csrno, target_ulong *val);
+static int read_time(CPURISCVState *env, int csrno, target_ulong *val);
+static int any(CPURISCVState *env, int csrno);
+static int read_zero(CPURISCVState *env, int csrno, target_ulong *val);
+static int read_mhartid(CPURISCVState *env, int csrno, target_ulong *val);
+static int read_mstatus(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mstatus(CPURISCVState *env, int csrno, target_ulong val);
+static int read_misa(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_misa(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mideleg(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mideleg(CPURISCVState *env, int csrno, target_ulong val);
+static int read_medeleg(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_medeleg(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mie(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mie(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mtvec(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mtvec(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mcounteren(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mcounteren(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mucounteren(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mucounteren(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mscounteren(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mscounteren(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mscratch(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mscratch(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mepc(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mepc(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mcause(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mcause(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mbadaddr(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mbadaddr(CPURISCVState *env, int csrno, target_ulong val);
+static int rmw_mip(CPURISCVState *env, int csrno, target_ulong *ret_value,
+                   target_ulong new_value, target_ulong write_mask);
+static int smode(CPURISCVState *env, int csrno);
+static int read_sstatus(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_sstatus(CPURISCVState *env, int csrno, target_ulong val);
+static int read_sie(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_sie(CPURISCVState *env, int csrno, target_ulong val);
+static int read_stvec(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_stvec(CPURISCVState *env, int csrno, target_ulong val);
+static int read_scounteren(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_scounteren(CPURISCVState *env, int csrno, target_ulong val);
+static int read_sscratch(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_sscratch(CPURISCVState *env, int csrno, target_ulong val);
+static int read_sepc(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_sepc(CPURISCVState *env, int csrno, target_ulong val);
+static int read_scause(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_scause(CPURISCVState *env, int csrno, target_ulong val);
+static int read_sbadaddr(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_sbadaddr(CPURISCVState *env, int csrno, target_ulong val);
+static int rmw_sip(CPURISCVState *env, int csrno, target_ulong *ret_value,
+                   target_ulong new_value, target_ulong write_mask);
+static int read_satp(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_satp(CPURISCVState *env, int csrno, target_ulong val);
+static int read_hstatus(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_hstatus(CPURISCVState *env, int csrno, target_ulong val);
+static int hmode(CPURISCVState *env, int csrno);
+static int read_hedeleg(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_hedeleg(CPURISCVState *env, int csrno, target_ulong val);
+static int read_hideleg(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_hideleg(CPURISCVState *env, int csrno, target_ulong val);
+static int rmw_hip(CPURISCVState *env, int csrno, target_ulong *ret_value,
+                   target_ulong new_value, target_ulong write_mask);
+static int read_hie(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_hie(CPURISCVState *env, int csrno, target_ulong val);
+static int read_hcounteren(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_hcounteren(CPURISCVState *env, int csrno, target_ulong val);
+static int read_htval(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_htval(CPURISCVState *env, int csrno, target_ulong val);
+static int read_htinst(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_htinst(CPURISCVState *env, int csrno, target_ulong val);
+static int read_hgatp(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_hgatp(CPURISCVState *env, int csrno, target_ulong val);
+static int read_htimedelta(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_htimedelta(CPURISCVState *env, int csrno, target_ulong val);
+static int read_vsstatus(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vsstatus(CPURISCVState *env, int csrno, target_ulong val);
+static int rmw_vsip(CPURISCVState *env, int csrno, target_ulong *ret_value,
+                    target_ulong new_value, target_ulong write_mask);
+static int read_vsie(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vsie(CPURISCVState *env, int csrno, target_ulong val);
+static int read_vstvec(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vstvec(CPURISCVState *env, int csrno, target_ulong val);
+static int read_vsscratch(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vsscratch(CPURISCVState *env, int csrno, target_ulong val);
+static int read_vsepc(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vsepc(CPURISCVState *env, int csrno, target_ulong val);
+static int read_vscause(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vscause(CPURISCVState *env, int csrno, target_ulong val);
+static int read_vstval(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vstval(CPURISCVState *env, int csrno, target_ulong val);
+static int read_vsatp(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_vsatp(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mtval2(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mtval2(CPURISCVState *env, int csrno, target_ulong val);
+static int read_mtinst(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mtinst(CPURISCVState *env, int csrno, target_ulong val);
+static int read_pmpcfg(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_pmpcfg(CPURISCVState *env, int csrno, target_ulong val);
+static int read_pmpaddr(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_pmpaddr(CPURISCVState *env, int csrno, target_ulong val);
+static int pmp(CPURISCVState *env, int csrno);
+
+#if defined(TARGET_RISCV32)
+static int read_instreth(CPURISCVState *env, int csrno, target_ulong *val);
+static int read_timeh(CPURISCVState *env, int csrno, target_ulong *val);
+static int read_mstatush(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_mstatush(CPURISCVState *env, int csrno, target_ulong val);
+static int read_htimedeltah(CPURISCVState *env, int csrno, target_ulong *val);
+static int write_htimedeltah(CPURISCVState *env, int csrno, target_ulong val);
+#endif
 
 /* CSR function table constants */
 enum {
     CSR_TABLE_SIZE = 0x1000
+};
+
+/* Control and Status Register function table */
+static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
+    /* User Floating-Point CSRs */
+    [CSR_FFLAGS] =              { fs,   read_fflags,      write_fflags      },
+    [CSR_FRM] =                 { fs,   read_frm,         write_frm         },
+    [CSR_FCSR] =                { fs,   read_fcsr,        write_fcsr        },
+
+    /* User Timers and Counters */
+    [CSR_CYCLE] =               { ctr,  read_instret                        },
+    [CSR_INSTRET] =             { ctr,  read_instret                        },
+#if defined(TARGET_RISCV32)
+    [CSR_CYCLEH] =              { ctr,  read_instreth                       },
+    [CSR_INSTRETH] =            { ctr,  read_instreth                       },
+#endif
+
+    /* In privileged mode, the monitor will have to emulate TIME CSRs only if
+     * rdtime callback is not provided by machine/platform emulation */
+    [CSR_TIME] =                { ctr,  read_time                           },
+#if defined(TARGET_RISCV32)
+    [CSR_TIMEH] =               { ctr,  read_timeh                          },
+#endif
+
+    /* Machine Timers and Counters */
+    [CSR_MCYCLE] =              { any,  read_instret                        },
+    [CSR_MINSTRET] =            { any,  read_instret                        },
+#if defined(TARGET_RISCV32)
+    [CSR_MCYCLEH] =             { any,  read_instreth                       },
+    [CSR_MINSTRETH] =           { any,  read_instreth                       },
+#endif
+
+    /* Machine Information Registers */
+    [CSR_MVENDORID] =           { any,  read_zero                           },
+    [CSR_MARCHID] =             { any,  read_zero                           },
+    [CSR_MIMPID] =              { any,  read_zero                           },
+    [CSR_MHARTID] =             { any,  read_mhartid                        },
+
+    /* Machine Trap Setup */
+    [CSR_MSTATUS] =             { any,  read_mstatus,     write_mstatus     },
+    [CSR_MISA] =                { any,  read_misa,        write_misa        },
+    [CSR_MIDELEG] =             { any,  read_mideleg,     write_mideleg     },
+    [CSR_MEDELEG] =             { any,  read_medeleg,     write_medeleg     },
+    [CSR_MIE] =                 { any,  read_mie,         write_mie         },
+    [CSR_MTVEC] =               { any,  read_mtvec,       write_mtvec       },
+    [CSR_MCOUNTEREN] =          { any,  read_mcounteren,  write_mcounteren  },
+
+#if defined(TARGET_RISCV32)
+    [CSR_MSTATUSH] =            { any,  read_mstatush,    write_mstatush    },
+#endif
+
+    /* Legacy Counter Setup (priv v1.9.1) */
+    [CSR_MUCOUNTEREN] =         { any,  read_mucounteren, write_mucounteren },
+    [CSR_MSCOUNTEREN] =         { any,  read_mscounteren, write_mscounteren },
+
+    /* Machine Trap Handling */
+    [CSR_MSCRATCH] =            { any,  read_mscratch,    write_mscratch    },
+    [CSR_MEPC] =                { any,  read_mepc,        write_mepc        },
+    [CSR_MCAUSE] =              { any,  read_mcause,      write_mcause      },
+    [CSR_MBADADDR] =            { any,  read_mbadaddr,    write_mbadaddr    },
+    [CSR_MIP] =                 { any,  NULL,     NULL,     rmw_mip         },
+
+    /* Supervisor Trap Setup */
+    [CSR_SSTATUS] =             { smode, read_sstatus,     write_sstatus     },
+    [CSR_SIE] =                 { smode, read_sie,         write_sie         },
+    [CSR_STVEC] =               { smode, read_stvec,       write_stvec       },
+    [CSR_SCOUNTEREN] =          { smode, read_scounteren,  write_scounteren  },
+
+    /* Supervisor Trap Handling */
+    [CSR_SSCRATCH] =            { smode, read_sscratch,    write_sscratch    },
+    [CSR_SEPC] =                { smode, read_sepc,        write_sepc        },
+    [CSR_SCAUSE] =              { smode, read_scause,      write_scause      },
+    [CSR_SBADADDR] =            { smode, read_sbadaddr,    write_sbadaddr    },
+    [CSR_SIP] =                 { smode, NULL,     NULL,     rmw_sip         },
+
+    /* Supervisor Protection and Translation */
+    [CSR_SATP] =                { smode, read_satp,        write_satp        },
+
+    [CSR_HSTATUS] =             { hmode,   read_hstatus,     write_hstatus    },
+    [CSR_HEDELEG] =             { hmode,   read_hedeleg,     write_hedeleg    },
+    [CSR_HIDELEG] =             { hmode,   read_hideleg,     write_hideleg    },
+    [CSR_HIP] =                 { hmode,   NULL,     NULL,     rmw_hip        },
+    [CSR_HIE] =                 { hmode,   read_hie,         write_hie        },
+    [CSR_HCOUNTEREN] =          { hmode,   read_hcounteren,  write_hcounteren },
+    [CSR_HTVAL] =               { hmode,   read_htval,       write_htval      },
+    [CSR_HTINST] =              { hmode,   read_htinst,      write_htinst     },
+    [CSR_HGATP] =               { hmode,   read_hgatp,       write_hgatp      },
+    [CSR_HTIMEDELTA] =          { hmode,   read_htimedelta,  write_htimedelta },
+#if defined(TARGET_RISCV32)
+    [CSR_HTIMEDELTAH] =         { hmode,   read_htimedeltah, write_htimedeltah},
+#endif
+
+    [CSR_VSSTATUS] =            { hmode,   read_vsstatus,    write_vsstatus   },
+    [CSR_VSIP] =                { hmode,   NULL,     NULL,     rmw_vsip       },
+    [CSR_VSIE] =                { hmode,   read_vsie,        write_vsie       },
+    [CSR_VSTVEC] =              { hmode,   read_vstvec,      write_vstvec     },
+    [CSR_VSSCRATCH] =           { hmode,   read_vsscratch,   write_vsscratch  },
+    [CSR_VSEPC] =               { hmode,   read_vsepc,       write_vsepc      },
+    [CSR_VSCAUSE] =             { hmode,   read_vscause,     write_vscause    },
+    [CSR_VSTVAL] =              { hmode,   read_vstval,      write_vstval     },
+    [CSR_VSATP] =               { hmode,   read_vsatp,       write_vsatp      },
+
+    [CSR_MTVAL2] =              { hmode,   read_mtval2,      write_mtval2     },
+    [CSR_MTINST] =              { hmode,   read_mtinst,      write_mtinst     },
+
+    /* Physical Memory Protection */
+    [CSR_PMPCFG0] =  { pmp,   read_pmpcfg,  write_pmpcfg   },
+    [CSR_PMPCFG1] =  { pmp,   read_pmpcfg,  write_pmpcfg   },
+    [CSR_PMPCFG2] =  { pmp,   read_pmpcfg,  write_pmpcfg   },
+    [CSR_PMPCFG3] =  { pmp,   read_pmpcfg,  write_pmpcfg   },
+
+    [CSR_PMPADDR0] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR1] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR2] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR3] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR4] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR5] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR6] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR7] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR8] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR9] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR10] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR11] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR12] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR13] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR14] = { pmp,   read_pmpaddr, write_pmpaddr  },
+    [CSR_PMPADDR15] = { pmp,   read_pmpaddr, write_pmpaddr  },
+
+    /* Performance Counters */
+    [CSR_HPMCOUNTER3] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER4] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER5] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER6] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER7] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER8] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER9] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER10] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER11] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER12] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER13] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER14] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER15] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER16] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER17] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER18] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER19] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER20] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER21] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER22] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER23] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER24] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER25] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER26] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER27] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER28] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER29] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER30] =    { ctr,  read_zero          },
+    [CSR_HPMCOUNTER31] =    { ctr,  read_zero          },
+
+    [CSR_MHPMCOUNTER3] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER4] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER5] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER6] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER7] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER8] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER9] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER10] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER11] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER12] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER13] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER14] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER15] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER16] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER17] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER18] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER19] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER20] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER21] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER22] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER23] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER24] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER25] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER26] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER27] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER28] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER29] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER30] =   { any,  read_zero          },
+    [CSR_MHPMCOUNTER31] =   { any,  read_zero          },
+
+    [CSR_MHPMEVENT3] =     { any,  read_zero          },
+    [CSR_MHPMEVENT4] =     { any,  read_zero          },
+    [CSR_MHPMEVENT5] =     { any,  read_zero          },
+    [CSR_MHPMEVENT6] =     { any,  read_zero          },
+    [CSR_MHPMEVENT7] =     { any,  read_zero          },
+    [CSR_MHPMEVENT8] =     { any,  read_zero          },
+    [CSR_MHPMEVENT9] =     { any,  read_zero          },
+    [CSR_MHPMEVENT10] =     { any,  read_zero          },
+    [CSR_MHPMEVENT11] =     { any,  read_zero          },
+    [CSR_MHPMEVENT12] =     { any,  read_zero          },
+    [CSR_MHPMEVENT13] =     { any,  read_zero          },
+    [CSR_MHPMEVENT14] =     { any,  read_zero          },
+    [CSR_MHPMEVENT15] =     { any,  read_zero          },
+    [CSR_MHPMEVENT16] =     { any,  read_zero          },
+    [CSR_MHPMEVENT17] =     { any,  read_zero          },
+    [CSR_MHPMEVENT18] =     { any,  read_zero          },
+    [CSR_MHPMEVENT19] =     { any,  read_zero          },
+    [CSR_MHPMEVENT20] =     { any,  read_zero          },
+    [CSR_MHPMEVENT21] =     { any,  read_zero          },
+    [CSR_MHPMEVENT22] =     { any,  read_zero          },
+    [CSR_MHPMEVENT23] =     { any,  read_zero          },
+    [CSR_MHPMEVENT24] =     { any,  read_zero          },
+    [CSR_MHPMEVENT25] =     { any,  read_zero          },
+    [CSR_MHPMEVENT26] =     { any,  read_zero          },
+    [CSR_MHPMEVENT27] =     { any,  read_zero          },
+    [CSR_MHPMEVENT28] =     { any,  read_zero          },
+    [CSR_MHPMEVENT29] =     { any,  read_zero          },
+    [CSR_MHPMEVENT30] =     { any,  read_zero          },
+    [CSR_MHPMEVENT31] =     { any,  read_zero          },
+
+#if defined(TARGET_RISCV32)
+    [CSR_HPMCOUNTER3H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER4H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER5H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER6H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER7H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER8H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER9H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER10H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER11H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER12H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER13H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER14H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER15H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER16H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER17H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER18H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER19H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER20H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER21H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER22H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER23H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER24H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER25H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER26H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER27H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER28H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER29H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER30H] =   { ctr,  read_zero          },
+    [CSR_HPMCOUNTER31H] =   { ctr,  read_zero          },
+
+    [CSR_MHPMCOUNTER3H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER4H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER5H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER6H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER7H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER8H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER9H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER10H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER11H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER12H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER13H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER14H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER15H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER16H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER17H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER18H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER19H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER20H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER21H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER22H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER23H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER24H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER25H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER26H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER27H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER28H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER29H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER30H] =  { any,  read_zero          },
+    [CSR_MHPMCOUNTER31H] =  { any,  read_zero          },
+#endif
 };
 
 /* CSR function table public API */
@@ -45,17 +441,14 @@ void riscv_set_csr_ops(int csrno, riscv_csr_operations *ops)
 /* Predicates */
 static int fs(CPURISCVState *env, int csrno)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -1;
     }
-#endif
     return 0;
 }
 
 static int ctr(CPURISCVState *env, int csrno)
 {
-#if !defined(CONFIG_USER_ONLY)
     CPUState *cs = env_cpu(env);
     RISCVCPU *cpu = RISCV_CPU(cs);
     uint32_t ctr_en = ~0u;
@@ -83,11 +476,9 @@ static int ctr(CPURISCVState *env, int csrno)
     if (!(ctr_en & (1u << (csrno & 31)))) {
         return -1;
     }
-#endif
     return 0;
 }
 
-#if !defined(CONFIG_USER_ONLY)
 static int any(CPURISCVState *env, int csrno)
 {
     return 0;
@@ -116,62 +507,51 @@ static int pmp(CPURISCVState *env, int csrno)
 {
     return -!riscv_feature(env, RISCV_FEATURE_PMP);
 }
-#endif
 
 /* User Floating-Point CSRs */
 static int read_fflags(CPURISCVState *env, int csrno, target_ulong *val)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -1;
     }
-#endif
     *val = riscv_cpu_get_fflags(env);
     return 0;
 }
 
 static int write_fflags(CPURISCVState *env, int csrno, target_ulong val)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -1;
     }
     env->mstatus |= MSTATUS_FS;
-#endif
     riscv_cpu_set_fflags(env, val & (FSR_AEXC >> FSR_AEXC_SHIFT));
     return 0;
 }
 
 static int read_frm(CPURISCVState *env, int csrno, target_ulong *val)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -1;
     }
-#endif
     *val = env->frm;
     return 0;
 }
 
 static int write_frm(CPURISCVState *env, int csrno, target_ulong val)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -1;
     }
     env->mstatus |= MSTATUS_FS;
-#endif
     env->frm = val & (FSR_RD >> FSR_RD_SHIFT);
     return 0;
 }
 
 static int read_fcsr(CPURISCVState *env, int csrno, target_ulong *val)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -1;
     }
-#endif
     *val = (riscv_cpu_get_fflags(env) << FSR_AEXC_SHIFT)
         | (env->frm << FSR_RD_SHIFT);
     return 0;
@@ -179,12 +559,10 @@ static int read_fcsr(CPURISCVState *env, int csrno, target_ulong *val)
 
 static int write_fcsr(CPURISCVState *env, int csrno, target_ulong val)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -1;
     }
     env->mstatus |= MSTATUS_FS;
-#endif
     env->frm = (val & FSR_RD) >> FSR_RD_SHIFT;
     riscv_cpu_set_fflags(env, (val & FSR_AEXC) >> FSR_AEXC_SHIFT);
     return 0;
@@ -193,50 +571,19 @@ static int write_fcsr(CPURISCVState *env, int csrno, target_ulong val)
 /* User Timers and Counters */
 static int read_instret(CPURISCVState *env, int csrno, target_ulong *val)
 {
-#if !defined(CONFIG_USER_ONLY)
-    if (use_icount) {
-        *val = cpu_get_icount();
-    } else {
-        *val = cpu_get_host_ticks();
-    }
-#else
     *val = cpu_get_host_ticks();
-#endif
+
     return 0;
 }
 
 #if defined(TARGET_RISCV32)
 static int read_instreth(CPURISCVState *env, int csrno, target_ulong *val)
 {
-#if !defined(CONFIG_USER_ONLY)
-    if (use_icount) {
-        *val = cpu_get_icount() >> 32;
-    } else {
-        *val = cpu_get_host_ticks() >> 32;
-    }
-#else
     *val = cpu_get_host_ticks() >> 32;
-#endif
+
     return 0;
 }
 #endif /* TARGET_RISCV32 */
-
-#if defined(CONFIG_USER_ONLY)
-static int read_time(CPURISCVState *env, int csrno, target_ulong *val)
-{
-    *val = cpu_get_host_ticks();
-    return 0;
-}
-
-#if defined(TARGET_RISCV32)
-static int read_timeh(CPURISCVState *env, int csrno, target_ulong *val)
-{
-    *val = cpu_get_host_ticks() >> 32;
-    return 0;
-}
-#endif
-
-#else /* CONFIG_USER_ONLY */
 
 static int read_time(CPURISCVState *env, int csrno, target_ulong *val)
 {
@@ -324,7 +671,7 @@ static const char valid_vm_1_10[16] = {
     [VM_1_10_SV48] = 1,
     [VM_1_10_SV57] = 1
 };
-#endif /* CONFIG_USER_ONLY */
+#endif
 
 /* Machine Information Registers */
 static int read_zero(CPURISCVState *env, int csrno, target_ulong *val)
@@ -1160,8 +1507,6 @@ static int write_pmpaddr(CPURISCVState *env, int csrno, target_ulong val)
     return 0;
 }
 
-#endif
-
 /*
  * riscv_csrrw - read and/or update control and status register
  *
@@ -1179,7 +1524,6 @@ int riscv_csrrw(CPURISCVState *env, int csrno, target_ulong *ret_value,
     RISCVCPU *cpu = env_archcpu(env);
 
     /* check privileges and return -1 if check fails */
-#if !defined(CONFIG_USER_ONLY)
     int effective_priv = env->priv;
     int read_only = get_field(csrno, 0xC00) == 3;
 
@@ -1198,7 +1542,6 @@ int riscv_csrrw(CPURISCVState *env, int csrno, target_ulong *ret_value,
         (!env->debugger && (effective_priv < get_field(csrno, 0x300)))) {
         return -1;
     }
-#endif
 
     /* ensure the CSR extension is enabled. */
     if (!cpu->cfg.ext_icsr) {
@@ -1253,131 +1596,9 @@ int riscv_csrrw_debug(CPURISCVState *env, int csrno, target_ulong *ret_value,
                 target_ulong new_value, target_ulong write_mask)
 {
     int ret;
-#if !defined(CONFIG_USER_ONLY)
     env->debugger = true;
-#endif
     ret = riscv_csrrw(env, csrno, ret_value, new_value, write_mask);
-#if !defined(CONFIG_USER_ONLY)
     env->debugger = false;
-#endif
     return ret;
 }
 
-/* Control and Status Register function table */
-static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
-    /* User Floating-Point CSRs */
-    [CSR_FFLAGS] =              { fs,   read_fflags,      write_fflags      },
-    [CSR_FRM] =                 { fs,   read_frm,         write_frm         },
-    [CSR_FCSR] =                { fs,   read_fcsr,        write_fcsr        },
-
-    /* User Timers and Counters */
-    [CSR_CYCLE] =               { ctr,  read_instret                        },
-    [CSR_INSTRET] =             { ctr,  read_instret                        },
-#if defined(TARGET_RISCV32)
-    [CSR_CYCLEH] =              { ctr,  read_instreth                       },
-    [CSR_INSTRETH] =            { ctr,  read_instreth                       },
-#endif
-
-    /* In privileged mode, the monitor will have to emulate TIME CSRs only if
-     * rdtime callback is not provided by machine/platform emulation */
-    [CSR_TIME] =                { ctr,  read_time                           },
-#if defined(TARGET_RISCV32)
-    [CSR_TIMEH] =               { ctr,  read_timeh                          },
-#endif
-
-#if !defined(CONFIG_USER_ONLY)
-    /* Machine Timers and Counters */
-    [CSR_MCYCLE] =              { any,  read_instret                        },
-    [CSR_MINSTRET] =            { any,  read_instret                        },
-#if defined(TARGET_RISCV32)
-    [CSR_MCYCLEH] =             { any,  read_instreth                       },
-    [CSR_MINSTRETH] =           { any,  read_instreth                       },
-#endif
-
-    /* Machine Information Registers */
-    [CSR_MVENDORID] =           { any,  read_zero                           },
-    [CSR_MARCHID] =             { any,  read_zero                           },
-    [CSR_MIMPID] =              { any,  read_zero                           },
-    [CSR_MHARTID] =             { any,  read_mhartid                        },
-
-    /* Machine Trap Setup */
-    [CSR_MSTATUS] =             { any,  read_mstatus,     write_mstatus     },
-    [CSR_MISA] =                { any,  read_misa,        write_misa        },
-    [CSR_MIDELEG] =             { any,  read_mideleg,     write_mideleg     },
-    [CSR_MEDELEG] =             { any,  read_medeleg,     write_medeleg     },
-    [CSR_MIE] =                 { any,  read_mie,         write_mie         },
-    [CSR_MTVEC] =               { any,  read_mtvec,       write_mtvec       },
-    [CSR_MCOUNTEREN] =          { any,  read_mcounteren,  write_mcounteren  },
-
-#if defined(TARGET_RISCV32)
-    [CSR_MSTATUSH] =            { any,  read_mstatush,    write_mstatush    },
-#endif
-
-    /* Legacy Counter Setup (priv v1.9.1) */
-    [CSR_MUCOUNTEREN] =         { any,  read_mucounteren, write_mucounteren },
-    [CSR_MSCOUNTEREN] =         { any,  read_mscounteren, write_mscounteren },
-
-    /* Machine Trap Handling */
-    [CSR_MSCRATCH] =            { any,  read_mscratch,    write_mscratch    },
-    [CSR_MEPC] =                { any,  read_mepc,        write_mepc        },
-    [CSR_MCAUSE] =              { any,  read_mcause,      write_mcause      },
-    [CSR_MBADADDR] =            { any,  read_mbadaddr,    write_mbadaddr    },
-    [CSR_MIP] =                 { any,  NULL,     NULL,     rmw_mip         },
-
-    /* Supervisor Trap Setup */
-    [CSR_SSTATUS] =             { smode, read_sstatus,     write_sstatus     },
-    [CSR_SIE] =                 { smode, read_sie,         write_sie         },
-    [CSR_STVEC] =               { smode, read_stvec,       write_stvec       },
-    [CSR_SCOUNTEREN] =          { smode, read_scounteren,  write_scounteren  },
-
-    /* Supervisor Trap Handling */
-    [CSR_SSCRATCH] =            { smode, read_sscratch,    write_sscratch    },
-    [CSR_SEPC] =                { smode, read_sepc,        write_sepc        },
-    [CSR_SCAUSE] =              { smode, read_scause,      write_scause      },
-    [CSR_SBADADDR] =            { smode, read_sbadaddr,    write_sbadaddr    },
-    [CSR_SIP] =                 { smode, NULL,     NULL,     rmw_sip         },
-
-    /* Supervisor Protection and Translation */
-    [CSR_SATP] =                { smode, read_satp,        write_satp        },
-
-    [CSR_HSTATUS] =             { hmode,   read_hstatus,     write_hstatus    },
-    [CSR_HEDELEG] =             { hmode,   read_hedeleg,     write_hedeleg    },
-    [CSR_HIDELEG] =             { hmode,   read_hideleg,     write_hideleg    },
-    [CSR_HIP] =                 { hmode,   NULL,     NULL,     rmw_hip        },
-    [CSR_HIE] =                 { hmode,   read_hie,         write_hie        },
-    [CSR_HCOUNTEREN] =          { hmode,   read_hcounteren,  write_hcounteren },
-    [CSR_HTVAL] =               { hmode,   read_htval,       write_htval      },
-    [CSR_HTINST] =              { hmode,   read_htinst,      write_htinst     },
-    [CSR_HGATP] =               { hmode,   read_hgatp,       write_hgatp      },
-    [CSR_HTIMEDELTA] =          { hmode,   read_htimedelta,  write_htimedelta },
-#if defined(TARGET_RISCV32)
-    [CSR_HTIMEDELTAH] =         { hmode,   read_htimedeltah, write_htimedeltah},
-#endif
-
-    [CSR_VSSTATUS] =            { hmode,   read_vsstatus,    write_vsstatus   },
-    [CSR_VSIP] =                { hmode,   NULL,     NULL,     rmw_vsip       },
-    [CSR_VSIE] =                { hmode,   read_vsie,        write_vsie       },
-    [CSR_VSTVEC] =              { hmode,   read_vstvec,      write_vstvec     },
-    [CSR_VSSCRATCH] =           { hmode,   read_vsscratch,   write_vsscratch  },
-    [CSR_VSEPC] =               { hmode,   read_vsepc,       write_vsepc      },
-    [CSR_VSCAUSE] =             { hmode,   read_vscause,     write_vscause    },
-    [CSR_VSTVAL] =              { hmode,   read_vstval,      write_vstval     },
-    [CSR_VSATP] =               { hmode,   read_vsatp,       write_vsatp      },
-
-    [CSR_MTVAL2] =              { hmode,   read_mtval2,      write_mtval2     },
-    [CSR_MTINST] =              { hmode,   read_mtinst,      write_mtinst     },
-
-    /* Physical Memory Protection */
-    [CSR_PMPCFG0  ... CSR_PMPADDR9] =  { pmp,   read_pmpcfg,  write_pmpcfg   },
-    [CSR_PMPADDR0 ... CSR_PMPADDR15] = { pmp,   read_pmpaddr, write_pmpaddr  },
-
-    /* Performance Counters */
-    [CSR_HPMCOUNTER3   ... CSR_HPMCOUNTER31] =    { ctr,  read_zero          },
-    [CSR_MHPMCOUNTER3  ... CSR_MHPMCOUNTER31] =   { any,  read_zero          },
-    [CSR_MHPMEVENT3    ... CSR_MHPMEVENT31] =     { any,  read_zero          },
-#if defined(TARGET_RISCV32)
-    [CSR_HPMCOUNTER3H  ... CSR_HPMCOUNTER31H] =   { ctr,  read_zero          },
-    [CSR_MHPMCOUNTER3H ... CSR_MHPMCOUNTER31H] =  { any,  read_zero          },
-#endif
-#endif /* !CONFIG_USER_ONLY */
-};

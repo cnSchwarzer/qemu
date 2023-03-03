@@ -70,7 +70,7 @@ static int tcg_out_ldst_finalize(TCGContext *s)
 
 static inline TCGLabelQemuLdst *new_ldst_label(TCGContext *s)
 {
-    TCGLabelQemuLdst *l = tcg_malloc(sizeof(*l));
+    TCGLabelQemuLdst *l = tcg_malloc(s, sizeof(*l));
 
     QSIMPLEQ_INSERT_TAIL(&s->ldst_labels, l, next);
 

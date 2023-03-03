@@ -22,9 +22,7 @@
 #include "internal.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
-#include "exec/log.h"
 #include "hw/mips/cpudevs.h"
-#include "qapi/qapi-commands-machine-target.h"
 
 enum {
     TLBRET_XI = -6,
@@ -36,7 +34,6 @@ enum {
     TLBRET_MATCH = 0
 };
 
-#if !defined(CONFIG_USER_ONLY)
 
 /* no MMU emulation */
 int no_mmu_map_address(CPUMIPSState *env, hwaddr *physical, int *prot,
@@ -239,6 +236,7 @@ static int get_physical_address(CPUMIPSState *env, hwaddr *physical,
 #define KVM_KSEG0_BASE  ((target_ulong)(int32_t)0x40000000UL)
 #define KVM_KSEG2_BASE  ((target_ulong)(int32_t)0x60000000UL)
 
+#if 0
     if (mips_um_ksegs_enabled()) {
         /* KVM T&E adds guest kernel segments in useg */
         if (real_address >= KVM_KSEG0_BASE) {
@@ -251,6 +249,7 @@ static int get_physical_address(CPUMIPSState *env, hwaddr *physical,
             }
         }
     }
+#endif
 
     if (address <= USEG_LIMIT) {
         /* useg */
@@ -429,8 +428,6 @@ void cpu_mips_store_status(CPUMIPSState *env, target_ulong val)
 void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val)
 {
     uint32_t mask = 0x00C00300;
-    uint32_t old = env->CP0_Cause;
-    int i;
 
     if (env->insn_flags & ISA_MIPS32R2) {
         mask |= 1 << CP0Ca_DC;
@@ -441,6 +438,8 @@ void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val)
 
     env->CP0_Cause = (env->CP0_Cause & ~mask) | (val & mask);
 
+#if 0
+    uint32_t old = env->CP0_Cause;
     if ((old ^ env->CP0_Cause) & (1 << CP0Ca_DC)) {
         if (env->CP0_Cause & (1 << CP0Ca_DC)) {
             cpu_mips_stop_count(env);
@@ -449,14 +448,15 @@ void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val)
         }
     }
 
+    int i;
     /* Set/reset software interrupts */
     for (i = 0 ; i < 2 ; i++) {
         if ((old ^ env->CP0_Cause) & (1 << (CP0Ca_IP + i))) {
             cpu_mips_soft_irq(env, i, env->CP0_Cause & (1 << (CP0Ca_IP + i)));
         }
     }
-}
 #endif
+}
 
 static void raise_mmu_exception(CPUMIPSState *env, target_ulong address,
                                 int rw, int tlb_error)
@@ -537,7 +537,6 @@ static void raise_mmu_exception(CPUMIPSState *env, target_ulong address,
     env->error_code = error_code;
 }
 
-#if !defined(CONFIG_USER_ONLY)
 hwaddr mips_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
 {
     MIPSCPU *cpu = MIPS_CPU(cs);
@@ -551,9 +550,7 @@ hwaddr mips_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
     }
     return phys_addr;
 }
-#endif
 
-#if !defined(CONFIG_USER_ONLY)
 #if !defined(TARGET_MIPS64)
 
 /*
@@ -634,7 +631,7 @@ static int walk_directory(CPUMIPSState *env, uint64_t *vaddr,
         return 0;
     }
 
-    if ((entry & (1 << psn)) && hugepg) {
+    if ((entry & (1ULL << psn)) && hugepg) {
         *huge_page = true;
         *hgpg_directory_hit = true;
         entry = get_tlb_entry_layout(env, entry, leafentry_size, pf_ptew);
@@ -887,7 +884,6 @@ refill:
     return true;
 }
 #endif
-#endif
 
 bool mips_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                        MMUAccessType access_type, int mmu_idx,
@@ -895,15 +891,12 @@ bool mips_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
 {
     MIPSCPU *cpu = MIPS_CPU(cs);
     CPUMIPSState *env = &cpu->env;
-#if !defined(CONFIG_USER_ONLY)
     hwaddr physical;
     int prot;
     int mips_access_type;
-#endif
     int ret = TLBRET_BADADDR;
 
     /* data access */
-#if !defined(CONFIG_USER_ONLY)
     /* XXX: put correct access by using cpu_restore_state() correctly */
     mips_access_type = ACCESS_INT;
     ret = get_physical_address(env, &physical, &prot, address,
@@ -952,13 +945,11 @@ bool mips_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     if (probe) {
         return false;
     }
-#endif
 
     raise_mmu_exception(env, address, access_type, ret);
     do_raise_exception_err(env, cs->exception_index, env->error_code, retaddr);
 }
 
-#ifndef CONFIG_USER_ONLY
 hwaddr cpu_mips_translate_address(CPUMIPSState *env, target_ulong address,
                                   int rw)
 {
@@ -979,6 +970,7 @@ hwaddr cpu_mips_translate_address(CPUMIPSState *env, target_ulong address,
     }
 }
 
+#if 0
 static const char * const excp_names[EXCP_LAST + 1] = {
     [EXCP_RESET] = "reset",
     [EXCP_SRESET] = "soft reset",
@@ -1038,7 +1030,6 @@ target_ulong exception_resume_pc(CPUMIPSState *env)
     return bad_pc;
 }
 
-#if !defined(CONFIG_USER_ONLY)
 static void set_hflags_for_handler(CPUMIPSState *env)
 {
     /* Exception handlers are entered in 32-bit mode.  */
@@ -1081,18 +1072,17 @@ static inline void set_badinstr_registers(CPUMIPSState *env)
         env->CP0_BadInstrP = cpu_ldl_code(env, env->active_tc.PC - 4);
     }
 }
-#endif
 
 void mips_cpu_do_interrupt(CPUState *cs)
 {
-#if !defined(CONFIG_USER_ONLY)
     MIPSCPU *cpu = MIPS_CPU(cs);
     CPUMIPSState *env = &cpu->env;
     bool update_badinstr = 0;
     target_ulong offset;
     int cause = -1;
-    const char *name;
 
+#if 0
+    const char *name;
     if (qemu_loglevel_mask(CPU_LOG_INT)
         && cs->exception_index != EXCP_EXT_INTERRUPT) {
         if (cs->exception_index < 0 || cs->exception_index > EXCP_LAST) {
@@ -1105,6 +1095,8 @@ void mips_cpu_do_interrupt(CPUState *cs)
                  " %s exception\n",
                  __func__, env->active_tc.PC, env->CP0_EPC, name);
     }
+#endif
+
     if (cs->exception_index == EXCP_EXT_INTERRUPT &&
         (env->hflags & MIPS_HFLAG_DM)) {
         cs->exception_index = EXCP_DINT;
@@ -1386,6 +1378,7 @@ void mips_cpu_do_interrupt(CPUState *cs)
     default:
         abort();
     }
+#if 0
     if (qemu_loglevel_mask(CPU_LOG_INT)
         && cs->exception_index != EXCP_EXT_INTERRUPT) {
         qemu_log("%s: PC " TARGET_FMT_lx " EPC " TARGET_FMT_lx " cause %d\n"
@@ -1395,6 +1388,7 @@ void mips_cpu_do_interrupt(CPUState *cs)
                  env->CP0_DEPC);
     }
 #endif
+
     cs->exception_index = EXCP_NONE;
 }
 
@@ -1416,7 +1410,6 @@ bool mips_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     return false;
 }
 
-#if !defined(CONFIG_USER_ONLY)
 void r4k_invalidate_tlb(CPUMIPSState *env, int idx, int use_extra)
 {
     CPUState *cs = env_cpu(env);
@@ -1481,7 +1474,6 @@ void r4k_invalidate_tlb(CPUMIPSState *env, int idx, int use_extra)
         }
     }
 }
-#endif
 
 void QEMU_NORETURN do_raise_exception_err(CPUMIPSState *env,
                                           uint32_t exception,
@@ -1490,42 +1482,17 @@ void QEMU_NORETURN do_raise_exception_err(CPUMIPSState *env,
 {
     CPUState *cs = env_cpu(env);
 
+#if 0
     qemu_log_mask(CPU_LOG_INT, "%s: %d %d\n",
                   __func__, exception, error_code);
+#endif
     cs->exception_index = exception;
     env->error_code = error_code;
 
+    // Unicorn: Imported from https://github.com/unicorn-engine/unicorn/pull/1098
+    if (exception == 0x11){
+        env->uc->next_pc = env->active_tc.PC + 4;
+    }
+
     cpu_loop_exit_restore(cs, pc);
-}
-
-static void mips_cpu_add_definition(gpointer data, gpointer user_data)
-{
-    ObjectClass *oc = data;
-    CpuDefinitionInfoList **cpu_list = user_data;
-    CpuDefinitionInfoList *entry;
-    CpuDefinitionInfo *info;
-    const char *typename;
-
-    typename = object_class_get_name(oc);
-    info = g_malloc0(sizeof(*info));
-    info->name = g_strndup(typename,
-                           strlen(typename) - strlen("-" TYPE_MIPS_CPU));
-    info->q_typename = g_strdup(typename);
-
-    entry = g_malloc0(sizeof(*entry));
-    entry->value = info;
-    entry->next = *cpu_list;
-    *cpu_list = entry;
-}
-
-CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
-{
-    CpuDefinitionInfoList *cpu_list = NULL;
-    GSList *list;
-
-    list = object_class_get_list(TYPE_MIPS_CPU, false);
-    g_slist_foreach(list, mips_cpu_add_definition, &cpu_list);
-    g_slist_free(list);
-
-    return cpu_list;
 }

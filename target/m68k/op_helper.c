@@ -21,20 +21,7 @@
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
-#include "hw/semihosting/semihost.h"
 
-#if defined(CONFIG_USER_ONLY)
-
-void m68k_cpu_do_interrupt(CPUState *cs)
-{
-    cs->exception_index = -1;
-}
-
-static inline void do_interrupt_m68k_hardirq(CPUM68KState *env)
-{
-}
-
-#else
 
 static void cf_rte(CPUM68KState *env)
 {
@@ -89,111 +76,6 @@ throwaway:
     cpu_m68k_set_sr(env, sr);
 }
 
-static const char *m68k_exception_name(int index)
-{
-    switch (index) {
-    case EXCP_ACCESS:
-        return "Access Fault";
-    case EXCP_ADDRESS:
-        return "Address Error";
-    case EXCP_ILLEGAL:
-        return "Illegal Instruction";
-    case EXCP_DIV0:
-        return "Divide by Zero";
-    case EXCP_CHK:
-        return "CHK/CHK2";
-    case EXCP_TRAPCC:
-        return "FTRAPcc, TRAPcc, TRAPV";
-    case EXCP_PRIVILEGE:
-        return "Privilege Violation";
-    case EXCP_TRACE:
-        return "Trace";
-    case EXCP_LINEA:
-        return "A-Line";
-    case EXCP_LINEF:
-        return "F-Line";
-    case EXCP_DEBEGBP: /* 68020/030 only */
-        return "Copro Protocol Violation";
-    case EXCP_FORMAT:
-        return "Format Error";
-    case EXCP_UNINITIALIZED:
-        return "Unitialized Interruot";
-    case EXCP_SPURIOUS:
-        return "Spurious Interrupt";
-    case EXCP_INT_LEVEL_1:
-        return "Level 1 Interrupt";
-    case EXCP_INT_LEVEL_1 + 1:
-        return "Level 2 Interrupt";
-    case EXCP_INT_LEVEL_1 + 2:
-        return "Level 3 Interrupt";
-    case EXCP_INT_LEVEL_1 + 3:
-        return "Level 4 Interrupt";
-    case EXCP_INT_LEVEL_1 + 4:
-        return "Level 5 Interrupt";
-    case EXCP_INT_LEVEL_1 + 5:
-        return "Level 6 Interrupt";
-    case EXCP_INT_LEVEL_1 + 6:
-        return "Level 7 Interrupt";
-    case EXCP_TRAP0:
-        return "TRAP #0";
-    case EXCP_TRAP0 + 1:
-        return "TRAP #1";
-    case EXCP_TRAP0 + 2:
-        return "TRAP #2";
-    case EXCP_TRAP0 + 3:
-        return "TRAP #3";
-    case EXCP_TRAP0 + 4:
-        return "TRAP #4";
-    case EXCP_TRAP0 + 5:
-        return "TRAP #5";
-    case EXCP_TRAP0 + 6:
-        return "TRAP #6";
-    case EXCP_TRAP0 + 7:
-        return "TRAP #7";
-    case EXCP_TRAP0 + 8:
-        return "TRAP #8";
-    case EXCP_TRAP0 + 9:
-        return "TRAP #9";
-    case EXCP_TRAP0 + 10:
-        return "TRAP #10";
-    case EXCP_TRAP0 + 11:
-        return "TRAP #11";
-    case EXCP_TRAP0 + 12:
-        return "TRAP #12";
-    case EXCP_TRAP0 + 13:
-        return "TRAP #13";
-    case EXCP_TRAP0 + 14:
-        return "TRAP #14";
-    case EXCP_TRAP0 + 15:
-        return "TRAP #15";
-    case EXCP_FP_BSUN:
-        return "FP Branch/Set on unordered condition";
-    case EXCP_FP_INEX:
-        return "FP Inexact Result";
-    case EXCP_FP_DZ:
-        return "FP Divide by Zero";
-    case EXCP_FP_UNFL:
-        return "FP Underflow";
-    case EXCP_FP_OPERR:
-        return "FP Operand Error";
-    case EXCP_FP_OVFL:
-        return "FP Overflow";
-    case EXCP_FP_SNAN:
-        return "FP Signaling NAN";
-    case EXCP_FP_UNIMP:
-        return "FP Unimplemented Data Type";
-    case EXCP_MMU_CONF: /* 68030/68851 only */
-        return "MMU Configuration Error";
-    case EXCP_MMU_ILLEGAL: /* 68851 only */
-        return "MMU Illegal Operation";
-    case EXCP_MMU_ACCESS: /* 68851 only */
-        return "MMU Access Level Violation";
-    case 64 ... 255:
-        return "User Defined Vector";
-    }
-    return "Unassigned";
-}
-
 static void cf_interrupt_all(CPUM68KState *env, int is_hw)
 {
     CPUState *cs = env_cpu(env);
@@ -213,15 +95,6 @@ static void cf_interrupt_all(CPUM68KState *env, int is_hw)
             cf_rte(env);
             return;
         case EXCP_HALT_INSN:
-            if (semihosting_enabled()
-                    && (env->sr & SR_S) != 0
-                    && (env->pc & 3) == 0
-                    && cpu_lduw_code(env, env->pc - 4) == 0x4e71
-                    && cpu_ldl_code(env, env->pc) == 0x4e7bf000) {
-                env->pc += 4;
-                do_m68k_semihosting(env, env->dregs[0]);
-                return;
-            }
             cs->halted = 1;
             cs->exception_index = EXCP_HLT;
             cpu_loop_exit(cs);
@@ -237,12 +110,6 @@ static void cf_interrupt_all(CPUM68KState *env, int is_hw)
     vector = cs->exception_index << 2;
 
     sr = env->sr | cpu_m68k_get_ccr(env);
-    if (qemu_loglevel_mask(CPU_LOG_INT)) {
-        static int count;
-        qemu_log("INT %6d: %s(%#x) pc=%08x sp=%08x sr=%04x\n",
-                 ++count, m68k_exception_name(cs->exception_index),
-                 vector, env->pc, env->aregs[7], sr);
-    }
 
     fmt |= 0x40000000;
     fmt |= vector << 16;
@@ -314,7 +181,22 @@ static void m68k_interrupt_all(CPUM68KState *env, int is_hw)
             /* Return from an exception.  */
             m68k_rte(env);
             return;
-        case EXCP_TRAP0 ...  EXCP_TRAP15:
+        case EXCP_TRAP0:
+        case EXCP_TRAP0 + 1:
+        case EXCP_TRAP0 + 2:
+        case EXCP_TRAP0 + 3:
+        case EXCP_TRAP0 + 4:
+        case EXCP_TRAP0 + 5:
+        case EXCP_TRAP0 + 6:
+        case EXCP_TRAP0 + 7:
+        case EXCP_TRAP0 + 8:
+        case EXCP_TRAP0 + 9:
+        case EXCP_TRAP0 + 10:
+        case EXCP_TRAP0 + 11:
+        case EXCP_TRAP0 + 12:
+        case EXCP_TRAP0 + 13:
+        case EXCP_TRAP0 + 14:
+        case EXCP_TRAP15:
             /* Move the PC after the trap instruction.  */
             retaddr += 2;
             break;
@@ -324,12 +206,6 @@ static void m68k_interrupt_all(CPUM68KState *env, int is_hw)
     vector = cs->exception_index << 2;
 
     sr = env->sr | cpu_m68k_get_ccr(env);
-    if (qemu_loglevel_mask(CPU_LOG_INT)) {
-        static int count;
-        qemu_log("INT %6d: %s(%#x) pc=%08x sp=%08x sr=%04x\n",
-                 ++count, m68k_exception_name(cs->exception_index),
-                 vector, env->pc, env->aregs[7], sr);
-    }
 
     /*
      * MC68040UM/AD,  chapter 9.3.10
@@ -402,11 +278,6 @@ static void m68k_interrupt_all(CPUM68KState *env, int is_hw)
 
         do_stack_frame(env, &sp, 7, oldsr, 0, retaddr);
         env->mmu.fault = false;
-        if (qemu_loglevel_mask(CPU_LOG_INT)) {
-            qemu_log("            "
-                     "ssw:  %08x ea:   %08x sfc:  %d    dfc: %d\n",
-                     env->mmu.ssw, env->mmu.ar, env->sfc, env->dfc);
-        }
     } else if (cs->exception_index == EXCP_ADDRESS) {
         do_stack_frame(env, &sp, 2, oldsr, 0, retaddr);
     } else if (cs->exception_index == EXCP_ILLEGAL ||
@@ -502,7 +373,6 @@ void m68k_cpu_transaction_failed(CPUState *cs, hwaddr physaddr, vaddr addr,
         cpu_loop_exit(cs);
     }
 }
-#endif
 
 bool m68k_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
@@ -769,7 +639,7 @@ static void do_cas2l(CPUM68KState *env, uint32_t regs, uint32_t a1, uint32_t a2,
     uint32_t u2 = env->dregs[Du2];
     uint32_t l1, l2;
     uintptr_t ra = GETPC();
-#if defined(CONFIG_ATOMIC64) && !defined(CONFIG_USER_ONLY)
+#if defined(CONFIG_ATOMIC64)
     int mmu_idx = cpu_mmu_index(env, 0);
     TCGMemOpIdx oi;
 #endif
@@ -781,23 +651,15 @@ static void do_cas2l(CPUM68KState *env, uint32_t regs, uint32_t a1, uint32_t a2,
         if ((a1 & 7) == 0 && a2 == a1 + 4) {
             c = deposit64(c2, 32, 32, c1);
             u = deposit64(u2, 32, 32, u1);
-#ifdef CONFIG_USER_ONLY
-            l = helper_atomic_cmpxchgq_be(env, a1, c, u);
-#else
             oi = make_memop_idx(MO_BEQ, mmu_idx);
             l = helper_atomic_cmpxchgq_be_mmu(env, a1, c, u, oi, ra);
-#endif
             l1 = l >> 32;
             l2 = l;
         } else if ((a2 & 7) == 0 && a1 == a2 + 4) {
             c = deposit64(c1, 32, 32, c2);
             u = deposit64(u1, 32, 32, u2);
-#ifdef CONFIG_USER_ONLY
-            l = helper_atomic_cmpxchgq_be(env, a2, c, u);
-#else
             oi = make_memop_idx(MO_BEQ, mmu_idx);
             l = helper_atomic_cmpxchgq_be_mmu(env, a2, c, u, oi, ra);
-#endif
             l2 = l >> 32;
             l1 = l;
         } else
@@ -921,7 +783,8 @@ static uint64_t bf_load(CPUM68KState *env, uint32_t addr, int blen,
     case 4:
         return cpu_ldq_data_ra(env, addr, ra);
     default:
-        g_assert_not_reached();
+        // g_assert_not_reached();
+        return 0;
     }
 }
 
@@ -981,7 +844,11 @@ uint32_t HELPER(bfins_mem)(CPUM68KState *env, uint32_t addr, uint32_t val,
     uintptr_t ra = GETPC();
     struct bf_data d = bf_prep(addr, ofs, len);
     uint64_t data = bf_load(env, d.addr, d.blen, ra);
+#ifdef _MSC_VER
+    uint64_t mask = 0xffffffffffffffffULL << (64 - d.len) >> d.bofs;
+#else
     uint64_t mask = -1ull << (64 - d.len) >> d.bofs;
+#endif
 
     data = (data & ~mask) | (((uint64_t)val << (64 - d.len)) >> d.bofs);
 
@@ -997,7 +864,11 @@ uint32_t HELPER(bfchg_mem)(CPUM68KState *env, uint32_t addr,
     uintptr_t ra = GETPC();
     struct bf_data d = bf_prep(addr, ofs, len);
     uint64_t data = bf_load(env, d.addr, d.blen, ra);
+#ifdef _MSC_VER
+    uint64_t mask = 0xffffffffffffffffULL << (64 - d.len) >> d.bofs;
+#else
     uint64_t mask = -1ull << (64 - d.len) >> d.bofs;
+#endif
 
     bf_store(env, d.addr, d.blen, data ^ mask, ra);
 
@@ -1010,7 +881,11 @@ uint32_t HELPER(bfclr_mem)(CPUM68KState *env, uint32_t addr,
     uintptr_t ra = GETPC();
     struct bf_data d = bf_prep(addr, ofs, len);
     uint64_t data = bf_load(env, d.addr, d.blen, ra);
+#ifdef _MSC_VER
+    uint64_t mask = 0xffffffffffffffffULL << (64 - d.len) >> d.bofs;
+#else
     uint64_t mask = -1ull << (64 - d.len) >> d.bofs;
+#endif
 
     bf_store(env, d.addr, d.blen, data & ~mask, ra);
 
@@ -1023,7 +898,11 @@ uint32_t HELPER(bfset_mem)(CPUM68KState *env, uint32_t addr,
     uintptr_t ra = GETPC();
     struct bf_data d = bf_prep(addr, ofs, len);
     uint64_t data = bf_load(env, d.addr, d.blen, ra);
+#ifdef _MSC_VER
+    uint64_t mask = 0xffffffffffffffffULL << (64 - d.len) >> d.bofs;
+#else
     uint64_t mask = -1ull << (64 - d.len) >> d.bofs;
+#endif
 
     bf_store(env, d.addr, d.blen, data | mask, ra);
 
@@ -1041,7 +920,11 @@ uint64_t HELPER(bfffo_mem)(CPUM68KState *env, uint32_t addr,
     uintptr_t ra = GETPC();
     struct bf_data d = bf_prep(addr, ofs, len);
     uint64_t data = bf_load(env, d.addr, d.blen, ra);
+#ifdef _MSC_VER
+    uint64_t mask = 0xffffffffffffffffULL << (64 - d.len) >> d.bofs;
+#else
     uint64_t mask = -1ull << (64 - d.len) >> d.bofs;
+#endif
     uint64_t n = (data & mask) << d.bofs;
     uint32_t ffo = helper_bfffo_reg(n >> 32, ofs, d.len);
 

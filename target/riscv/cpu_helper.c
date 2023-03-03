@@ -19,22 +19,15 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
-#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "tcg/tcg-op.h"
-#include "trace.h"
 
 int riscv_cpu_mmu_index(CPURISCVState *env, bool ifetch)
 {
-#ifdef CONFIG_USER_ONLY
-    return 0;
-#else
     return env->priv;
-#endif
 }
 
-#ifndef CONFIG_USER_ONLY
 static int riscv_cpu_local_irq_pending(CPURISCVState *env)
 {
     target_ulong irqs;
@@ -56,7 +49,11 @@ static int riscv_cpu_local_irq_pending(CPURISCVState *env)
                           (env->priv == PRV_S && hs_mstatus_sie);
 
     if (riscv_cpu_virt_enabled(env)) {
+#ifdef _MSC_VER
+        target_ulong pending_hs_irq = pending & (0 - hs_sie);
+#else
         target_ulong pending_hs_irq = pending & -hs_sie;
+#endif
 
         if (pending_hs_irq) {
             riscv_cpu_set_force_hs_excep(env, FORCE_HS_EXCEP);
@@ -66,7 +63,11 @@ static int riscv_cpu_local_irq_pending(CPURISCVState *env)
         pending = vspending;
     }
 
+#ifdef _MSC_VER
+    irqs = (pending & ~env->mideleg & (0 - mie)) | (pending &  env->mideleg & (0 - sie));
+#else
     irqs = (pending & ~env->mideleg & -mie) | (pending &  env->mideleg & -sie);
+#endif
 
     if (irqs) {
         return ctz64(irqs); /* since non-zero */
@@ -74,11 +75,9 @@ static int riscv_cpu_local_irq_pending(CPURISCVState *env)
         return EXCP_NONE; /* indicates no pending interrupt */
     }
 }
-#endif
 
 bool riscv_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
-#if !defined(CONFIG_USER_ONLY)
     if (interrupt_request & CPU_INTERRUPT_HARD) {
         RISCVCPU *cpu = RISCV_CPU(cs);
         CPURISCVState *env = &cpu->env;
@@ -89,11 +88,8 @@ bool riscv_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
             return true;
         }
     }
-#endif
     return false;
 }
-
-#if !defined(CONFIG_USER_ONLY)
 
 /* Return true is floating point support is currently enabled */
 bool riscv_cpu_fp_enabled(CPURISCVState *env)
@@ -236,12 +232,6 @@ uint32_t riscv_cpu_update_mip(RISCVCPU *cpu, uint32_t mask, uint32_t value)
     CPURISCVState *env = &cpu->env;
     CPUState *cs = CPU(cpu);
     uint32_t old = env->mip;
-    bool locked = false;
-
-    if (!qemu_mutex_iothread_locked()) {
-        locked = true;
-        qemu_mutex_lock_iothread();
-    }
 
     env->mip = (env->mip & ~mask) | (value & mask);
 
@@ -249,10 +239,6 @@ uint32_t riscv_cpu_update_mip(RISCVCPU *cpu, uint32_t mask, uint32_t value)
         cpu_interrupt(cs, CPU_INTERRUPT_HARD);
     } else {
         cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
-    }
-
-    if (locked) {
-        qemu_mutex_unlock_iothread();
     }
 
     return old;
@@ -314,6 +300,9 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
     int mode = mmu_idx;
     bool use_background = false;
+    hwaddr base;
+    int levels = 0, ptidxbits = 0, ptesize = 0, vm, sum, mxr, widened;
+
 
     /*
      * Check if we should use the background registers for the two
@@ -354,9 +343,6 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     }
 
     *prot = 0;
-
-    hwaddr base;
-    int levels, ptidxbits, ptesize, vm, sum, mxr, widened;
 
     if (first_stage == true) {
         mxr = get_field(env->mstatus, MSTATUS_MXR);
@@ -470,9 +456,17 @@ restart:
         }
 
 #if defined(TARGET_RISCV32)
-        target_ulong pte = address_space_ldl(cs->as, pte_addr, attrs, &res);
+#ifdef UNICORN_ARCH_POSTFIX
+        target_ulong pte = glue(address_space_ldl, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, pte_addr, attrs, &res);
+#else
+        target_ulong pte = address_space_ldl(cs->as->uc, cs->as, pte_addr, attrs, &res);
+#endif
 #elif defined(TARGET_RISCV64)
-        target_ulong pte = address_space_ldq(cs->as, pte_addr, attrs, &res);
+#ifdef UNICORN_ARCH_POSTFIX
+        target_ulong pte = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, pte_addr, attrs, &res);
+#else
+        target_ulong pte = address_space_ldq(cs->as->uc, cs->as, pte_addr, attrs, &res);
+#endif
 #endif
         if (res != MEMTX_OK) {
             return TRANSLATE_FAIL;
@@ -534,14 +528,18 @@ restart:
                     &addr1, &l, false, MEMTXATTRS_UNSPECIFIED);
                 if (memory_region_is_ram(mr)) {
                     target_ulong *pte_pa =
-                        qemu_map_ram_ptr(mr->ram_block, addr1);
+                        qemu_map_ram_ptr(mr->uc, mr->ram_block, addr1);
 #if TCG_OVERSIZED_GUEST
                     /* MTTCG is not enabled on oversized TCG guests so
                      * page table updates do not need to be atomic */
                     *pte_pa = pte = updated_pte;
 #else
                     target_ulong old_pte =
+#ifdef _MSC_VER
+                        atomic_cmpxchg((long *)pte_pa, pte, updated_pte);
+#else
                         atomic_cmpxchg(pte_pa, pte, updated_pte);
+#endif
                     if (old_pte != pte) {
                         goto restart;
                     } else {
@@ -695,7 +693,6 @@ void riscv_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     env->badaddr = addr;
     riscv_raise_exception(env, cs->exception_index, retaddr);
 }
-#endif
 
 bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                         MMUAccessType access_type, int mmu_idx,
@@ -703,7 +700,6 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
 {
     RISCVCPU *cpu = RISCV_CPU(cs);
     CPURISCVState *env = &cpu->env;
-#ifndef CONFIG_USER_ONLY
     vaddr im_address;
     hwaddr pa = 0;
     int prot;
@@ -813,24 +809,6 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     }
 
     return true;
-
-#else
-    switch (access_type) {
-    case MMU_INST_FETCH:
-        cs->exception_index = RISCV_EXCP_INST_PAGE_FAULT;
-        break;
-    case MMU_DATA_LOAD:
-        cs->exception_index = RISCV_EXCP_LOAD_PAGE_FAULT;
-        break;
-    case MMU_DATA_STORE:
-        cs->exception_index = RISCV_EXCP_STORE_PAGE_FAULT;
-        break;
-    default:
-        g_assert_not_reached();
-    }
-    env->badaddr = address;
-    cpu_loop_exit_restore(cs, retaddr);
-#endif
 }
 
 /*
@@ -841,8 +819,6 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
  */
 void riscv_cpu_do_interrupt(CPUState *cs)
 {
-#if !defined(CONFIG_USER_ONLY)
-
     RISCVCPU *cpu = RISCV_CPU(cs);
     CPURISCVState *env = &cpu->env;
     bool force_hs_execp = riscv_cpu_force_hs_excep_enabled(env);
@@ -895,9 +871,6 @@ void riscv_cpu_do_interrupt(CPUState *cs)
             }
         }
     }
-
-    trace_riscv_trap(env->mhartid, async, cause, env->pc, tval, cause < 23 ?
-        (async ? riscv_intr_names : riscv_excp_names)[cause] : "(unknown)");
 
     if (env->priv <= PRV_S &&
             cause < TARGET_LONG_BITS && ((deleg >> cause) & 1)) {
@@ -1001,6 +974,5 @@ void riscv_cpu_do_interrupt(CPUState *cs)
      * RISC-V ISA Specification.
      */
 
-#endif
     cs->exception_index = EXCP_NONE; /* mark handled to qemu */
 }

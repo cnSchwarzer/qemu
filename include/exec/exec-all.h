@@ -20,11 +20,9 @@
 #ifndef EXEC_ALL_H
 #define EXEC_ALL_H
 
-#include "cpu.h"
+#include "hw/core/cpu.h"
 #include "exec/tb-context.h"
-#ifdef CONFIG_TCG
 #include "exec/cpu_ldst.h"
-#endif
 #include "sysemu/cpus.h"
 
 /* allow to see translation results - the slowdown should be negligible, so we leave it */
@@ -33,21 +31,14 @@
 /* Page tracking code uses ram addresses in system mode, and virtual
    addresses in userspace mode.  Define tb_page_addr_t to be an appropriate
    type.  */
-#if defined(CONFIG_USER_ONLY)
-typedef abi_ulong tb_page_addr_t;
-#define TB_PAGE_ADDR_FMT TARGET_ABI_FMT_lx
-#else
 typedef ram_addr_t tb_page_addr_t;
 #define TB_PAGE_ADDR_FMT RAM_ADDR_FMT
-#endif
 
 #include "qemu/log.h"
 
 void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int max_insns);
 void restore_state_to_opc(CPUArchState *env, TranslationBlock *tb,
                           target_ulong *data);
-
-void cpu_gen_init(void);
 
 /**
  * cpu_restore_state:
@@ -89,16 +80,14 @@ void QEMU_NORETURN cpu_loop_exit_atomic(CPUState *cpu, uintptr_t pc);
  */
 static inline bool cpu_loop_exit_requested(CPUState *cpu)
 {
-    return (int32_t)atomic_read(&cpu_neg(cpu)->icount_decr.u32) < 0;
+    return (int32_t)cpu_neg(cpu)->icount_decr.u32 < 0;
 }
 
-#if !defined(CONFIG_USER_ONLY)
 void cpu_reloading_memory_map(void);
 /**
  * cpu_address_space_init:
  * @cpu: CPU to add this address space to
  * @asidx: integer index of this address space
- * @prefix: prefix to be used as name of address space
  * @mr: the root memory region of address space
  *
  * Add the specified address space to the CPU's cpu_ases list.
@@ -110,14 +99,9 @@ void cpu_reloading_memory_map(void);
  * Before the first call to this function, the caller must set
  * cpu->num_ases to the total number of address spaces it needs
  * to support.
- *
- * Note that with KVM only one address space is supported.
  */
-void cpu_address_space_init(CPUState *cpu, int asidx,
-                            const char *prefix, MemoryRegion *mr);
-#endif
+void cpu_address_space_init(CPUState *cpu, int asidx, MemoryRegion *mr);
 
-#if !defined(CONFIG_USER_ONLY) && defined(CONFIG_TCG)
 /* cputlb.c */
 /**
  * tlb_init - initialize a CPU's TLB
@@ -280,56 +264,6 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
 void tlb_set_page(CPUState *cpu, target_ulong vaddr,
                   hwaddr paddr, int prot,
                   int mmu_idx, target_ulong size);
-#else
-static inline void tlb_init(CPUState *cpu)
-{
-}
-static inline void tlb_flush_page(CPUState *cpu, target_ulong addr)
-{
-}
-static inline void tlb_flush_page_all_cpus(CPUState *src, target_ulong addr)
-{
-}
-static inline void tlb_flush_page_all_cpus_synced(CPUState *src,
-                                                  target_ulong addr)
-{
-}
-static inline void tlb_flush(CPUState *cpu)
-{
-}
-static inline void tlb_flush_all_cpus(CPUState *src_cpu)
-{
-}
-static inline void tlb_flush_all_cpus_synced(CPUState *src_cpu)
-{
-}
-static inline void tlb_flush_page_by_mmuidx(CPUState *cpu,
-                                            target_ulong addr, uint16_t idxmap)
-{
-}
-
-static inline void tlb_flush_by_mmuidx(CPUState *cpu, uint16_t idxmap)
-{
-}
-static inline void tlb_flush_page_by_mmuidx_all_cpus(CPUState *cpu,
-                                                     target_ulong addr,
-                                                     uint16_t idxmap)
-{
-}
-static inline void tlb_flush_page_by_mmuidx_all_cpus_synced(CPUState *cpu,
-                                                            target_ulong addr,
-                                                            uint16_t idxmap)
-{
-}
-static inline void tlb_flush_by_mmuidx_all_cpus(CPUState *cpu, uint16_t idxmap)
-{
-}
-
-static inline void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *cpu,
-                                                       uint16_t idxmap)
-{
-}
-#endif
 void *probe_access(CPUArchState *env, target_ulong addr, int size,
                    MMUAccessType access_type, int mmu_idx, uintptr_t retaddr);
 
@@ -351,11 +285,7 @@ static inline void *probe_read(CPUArchState *env, target_ulong addr, int size,
 /* ??? The following is based on a 2015 survey of x86_64 host output.
    Better would seem to be some sort of dynamically sized TB array,
    adapting to the block sizes actually being produced.  */
-#if defined(CONFIG_SOFTMMU)
 #define CODE_GEN_AVG_BLOCK_SIZE 400
-#else
-#define CODE_GEN_AVG_BLOCK_SIZE 150
-#endif
 
 /*
  * Translation Cache-related fields of a TB.
@@ -402,9 +332,6 @@ struct TranslationBlock {
     uintptr_t page_next[2];
     tb_page_addr_t page_addr[2];
 
-    /* jmp_lock placed here to fill a 4-byte hole. Its documentation is below */
-    QemuSpin jmp_lock;
-
     /* The following data are used to directly call another TB from
      * the code of this one. This can be done either by emitting direct or
      * indirect native jump instructions. These jumps are reset so that the TB
@@ -436,41 +363,38 @@ struct TranslationBlock {
     uintptr_t jmp_list_head;
     uintptr_t jmp_list_next[2];
     uintptr_t jmp_dest[2];
+    uint32_t hash;  // unicorn needs this hash to remove this TB from QHT cache
 };
 
-extern bool parallel_cpus;
+// extern bool parallel_cpus;
 
 /* Hide the atomic_read to make code a little easier on the eyes */
 static inline uint32_t tb_cflags(const TranslationBlock *tb)
 {
-    return atomic_read(&tb->cflags);
+    return tb->cflags;
 }
 
 /* current cflags for hashing/comparison */
 static inline uint32_t curr_cflags(void)
 {
-    return (parallel_cpus ? CF_PARALLEL : 0)
-         | (use_icount ? CF_USE_ICOUNT : 0);
+    return 0;
 }
 
 /* TranslationBlock invalidate API */
-#if defined(CONFIG_USER_ONLY)
-void tb_invalidate_phys_addr(target_ulong addr);
-void tb_invalidate_phys_range(target_ulong start, target_ulong end);
-#else
 void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr, MemTxAttrs attrs);
-#endif
 void tb_flush(CPUState *cpu);
-void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr);
+void tb_phys_invalidate(TCGContext *tcg_ctx, TranslationBlock *tb, tb_page_addr_t page_addr);
 TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
                                    target_ulong cs_base, uint32_t flags,
                                    uint32_t cf_mask);
 void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr);
+void tb_exec_lock(TCGContext*);
+void tb_exec_unlock(TCGContext*);
 
 /* GETPC is the true target of the return instruction that we'll execute.  */
-#if defined(CONFIG_TCG_INTERPRETER)
-extern uintptr_t tci_tb_ptr;
-# define GETPC() tci_tb_ptr
+#ifdef _MSC_VER
+#include <intrin.h>
+# define GETPC() (uintptr_t)_ReturnAddress()
 #else
 # define GETPC() \
     ((uintptr_t)__builtin_extract_return_addr(__builtin_return_address(0)))
@@ -485,7 +409,7 @@ extern uintptr_t tci_tb_ptr;
    smaller than 4 bytes, so we don't worry about special-casing this.  */
 #define GETPC_ADJ   2
 
-#if !defined(CONFIG_USER_ONLY) && defined(CONFIG_DEBUG_TCG)
+#if defined(CONFIG_DEBUG_TCG)
 void assert_no_pages_locked(void);
 #else
 static inline void assert_no_pages_locked(void)
@@ -493,7 +417,6 @@ static inline void assert_no_pages_locked(void)
 }
 #endif
 
-#if !defined(CONFIG_USER_ONLY)
 
 /**
  * iotlb_to_section:
@@ -506,46 +429,7 @@ static inline void assert_no_pages_locked(void)
  */
 struct MemoryRegionSection *iotlb_to_section(CPUState *cpu,
                                              hwaddr index, MemTxAttrs attrs);
-#endif
 
-#if defined(CONFIG_USER_ONLY)
-void mmap_lock(void);
-void mmap_unlock(void);
-bool have_mmap_lock(void);
-
-/**
- * get_page_addr_code() - user-mode version
- * @env: CPUArchState
- * @addr: guest virtual address of guest code
- *
- * Returns @addr.
- */
-static inline tb_page_addr_t get_page_addr_code(CPUArchState *env,
-                                                target_ulong addr)
-{
-    return addr;
-}
-
-/**
- * get_page_addr_code_hostp() - user-mode version
- * @env: CPUArchState
- * @addr: guest virtual address of guest code
- *
- * Returns @addr.
- *
- * If @hostp is non-NULL, sets *@hostp to the host address where @addr's content
- * is kept.
- */
-static inline tb_page_addr_t get_page_addr_code_hostp(CPUArchState *env,
-                                                      target_ulong addr,
-                                                      void **hostp)
-{
-    if (hostp) {
-        *hostp = g2h(addr);
-    }
-    return addr;
-}
-#else
 static inline void mmap_lock(void) {}
 static inline void mmap_unlock(void) {}
 
@@ -591,9 +475,5 @@ address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr addr,
                                   MemTxAttrs attrs, int *prot);
 hwaddr memory_region_section_get_iotlb(CPUState *cpu,
                                        MemoryRegionSection *section);
-#endif
-
-/* vl.c */
-extern int singlestep;
 
 #endif

@@ -22,7 +22,6 @@
 #include "exec/exec-all.h"
 #include "qemu/host-utils.h"
 #include "exec/helper-proto.h"
-#include "qapi/error.h"
 #include "qemu/guest-random.h"
 
 //#define DEBUG_MULDIV
@@ -109,7 +108,7 @@ void helper_idivw_AX(CPUX86State *env, target_ulong t0)
     if (den == 0) {
         raise_exception_ra(env, EXCP00_DIVZ, GETPC());
     }
-    q = (num / den);
+    q = ((int64_t)num / den);
     if (q != (int16_t)q) {
         raise_exception_ra(env, EXCP00_DIVZ, GETPC());
     }
@@ -125,7 +124,7 @@ void helper_divl_EAX(CPUX86State *env, target_ulong t0)
     uint64_t num, q;
 
     num = ((uint32_t)env->regs[R_EAX]) | ((uint64_t)((uint32_t)env->regs[R_EDX]) << 32);
-    den = t0;
+    den = (unsigned int)t0;
     if (den == 0) {
         raise_exception_ra(env, EXCP00_DIVZ, GETPC());
     }
@@ -144,7 +143,7 @@ void helper_idivl_EAX(CPUX86State *env, target_ulong t0)
     int64_t num, q;
 
     num = ((uint32_t)env->regs[R_EAX]) | ((uint64_t)((uint32_t)env->regs[R_EDX]) << 32);
-    den = t0;
+    den = (int)t0;
     if (den == 0) {
         raise_exception_ra(env, EXCP00_DIVZ, GETPC());
     }
@@ -356,7 +355,7 @@ static int idiv64(uint64_t *plow, uint64_t *phigh, int64_t b)
         neg128(plow, phigh);
     }
     sb = (b < 0);
-    if (sb) {
+    if (sb && (b != 0x8000000000000000LL)) {
         b = -b;
     }
     if (div64(plow, phigh, b) != 0) {
@@ -366,14 +365,14 @@ static int idiv64(uint64_t *plow, uint64_t *phigh, int64_t b)
         if (*plow > (1ULL << 63)) {
             return 1;
         }
-        *plow = -*plow;
+        *plow = 0-*plow;
     } else {
         if (*plow >= (1ULL << 63)) {
             return 1;
         }
     }
     if (sa) {
-        *phigh = -*phigh;
+        *phigh = 0-*phigh;
     }
     return 0;
 }
@@ -475,13 +474,12 @@ void helper_cr4_testbit(CPUX86State *env, uint32_t bit)
 
 target_ulong HELPER(rdrand)(CPUX86State *env)
 {
-    Error *err = NULL;
     target_ulong ret;
 
-    if (qemu_guest_getrandom(&ret, sizeof(ret), &err) < 0) {
-        qemu_log_mask(LOG_UNIMP, "rdrand: Crypto failure: %s",
-                      error_get_pretty(err));
-        error_free(err);
+    if (qemu_guest_getrandom(&ret, sizeof(ret)) < 0) {
+        // qemu_log_mask(LOG_UNIMP, "rdrand: Crypto failure: %s",
+        //               error_get_pretty(err));
+        // error_free(err);
         /* Failure clears CF and all other flags, and returns 0.  */
         env->cc_src = 0;
         return 0;

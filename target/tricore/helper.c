@@ -15,12 +15,16 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+   Modified for Unicorn Engine by Eric Poole <eric.poole@aptiv.com>, 2022
+   Copyright 2022 Aptiv 
+*/
+
 #include "qemu/osdep.h"
 
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "fpu/softfloat-helpers.h"
-#include "qemu/qemu-print.h"
 
 enum {
     TLBRET_DIRTY = -4,
@@ -33,7 +37,7 @@ enum {
 #if defined(CONFIG_SOFTMMU)
 static int get_physical_address(CPUTriCoreState *env, hwaddr *physical,
                                 int *prot, target_ulong address,
-                                int rw, int access_type)
+                                MMUAccessType access_type, int mmu_idx)
 {
     int ret = TLBRET_MATCH;
 
@@ -41,6 +45,20 @@ static int get_physical_address(CPUTriCoreState *env, hwaddr *physical,
     *prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
 
     return ret;
+}
+
+hwaddr tricore_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
+{
+    TriCoreCPU *cpu = TRICORE_CPU(cs);
+    hwaddr phys_addr;
+    int prot;
+    int mmu_idx = cpu_mmu_index(&cpu->env, false);
+
+    if (get_physical_address(&cpu->env, &phys_addr, &prot, addr,
+                             MMU_DATA_LOAD, mmu_idx)) {
+        return -1;
+    }
+    return phys_addr;
 }
 #endif
 
@@ -58,17 +76,15 @@ bool tricore_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     CPUTriCoreState *env = &cpu->env;
     hwaddr physical;
     int prot;
-    int access_type;
     int ret = 0;
 
     rw &= 1;
-    access_type = ACCESS_INT;
     ret = get_physical_address(env, &physical, &prot,
-                               address, rw, access_type);
+                               address, rw, mmu_idx);
 
-    qemu_log_mask(CPU_LOG_MMU, "%s address=" TARGET_FMT_lx " ret %d physical "
-                  TARGET_FMT_plx " prot %d\n",
-                  __func__, (target_ulong)address, ret, physical, prot);
+    // qemu_log_mask(CPU_LOG_MMU, "%s address=" TARGET_FMT_lx " ret %d physical "
+    //               TARGET_FMT_plx " prot %d\n",
+    //               __func__, (target_ulong)address, ret, physical, prot);
 
     if (ret == TLBRET_MATCH) {
         tlb_set_page(cs, address & TARGET_PAGE_MASK,
@@ -85,6 +101,7 @@ bool tricore_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     }
 }
 
+#if 0
 static void tricore_cpu_list_entry(gpointer data, gpointer user_data)
 {
     ObjectClass *oc = data;
@@ -96,7 +113,9 @@ static void tricore_cpu_list_entry(gpointer data, gpointer user_data)
     qemu_printf("  %s\n", name);
     g_free(name);
 }
+#endif
 
+#if 0
 void tricore_cpu_list(void)
 {
     GSList *list;
@@ -106,6 +125,7 @@ void tricore_cpu_list(void)
     g_slist_foreach(list, tricore_cpu_list_entry, NULL);
     g_slist_free(list);
 }
+#endif
 
 void fpu_set_state(CPUTriCoreState *env)
 {

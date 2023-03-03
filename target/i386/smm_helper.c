@@ -18,24 +18,10 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
-#include "exec/log.h"
 
 /* SMM support */
-
-#if defined(CONFIG_USER_ONLY)
-
-void do_smm_enter(X86CPU *cpu)
-{
-}
-
-void helper_rsm(CPUX86State *env)
-{
-}
-
-#else
 
 #ifdef TARGET_X86_64
 #define SMM_REVISION_ID 0x00020064
@@ -51,8 +37,8 @@ void do_smm_enter(X86CPU *cpu)
     SegmentCache *dt;
     int i, offset;
 
-    qemu_log_mask(CPU_LOG_INT, "SMM: enter\n");
-    log_cpu_state_mask(CPU_LOG_INT, CPU(cpu), CPU_DUMP_CCOP);
+    // qemu_log_mask(CPU_LOG_INT, "SMM: enter\n");
+    // log_cpu_state_mask(CPU_LOG_INT, CPU(cpu), CPU_DUMP_CCOP);
 
     env->msr_smi_count++;
     env->hflags |= HF_SMM_MASK;
@@ -204,7 +190,6 @@ void do_smm_enter(X86CPU *cpu)
 
 void helper_rsm(CPUX86State *env)
 {
-    X86CPU *cpu = env_archcpu(env);
     CPUState *cs = env_cpu(env);
     target_ulong sm_state;
     int i, offset;
@@ -325,8 +310,6 @@ void helper_rsm(CPUX86State *env)
     env->hflags2 &= ~HF2_SMM_INSIDE_NMI_MASK;
     env->hflags &= ~HF_SMM_MASK;
 
-    qemu_log_mask(CPU_LOG_INT, "SMM: after RSM\n");
-    log_cpu_state_mask(CPU_LOG_INT, CPU(cpu), CPU_DUMP_CCOP);
+    // qemu_log_mask(CPU_LOG_INT, "SMM: after RSM\n");
+    // log_cpu_state_mask(CPU_LOG_INT, CPU(cpu), CPU_DUMP_CCOP);
 }
-
-#endif /* !CONFIG_USER_ONLY */

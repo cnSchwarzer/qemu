@@ -24,7 +24,9 @@
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
-#include "exec/log.h"
+
+#include "uc_priv.h"
+#include <unicorn/unicorn.h>
 
 //#define DEBUG_PCALL
 
@@ -501,12 +503,10 @@ static void switch_tss_ra(CPUX86State *env, int tss_selector,
         raise_exception_err_ra(env, EXCP0D_GPF, 0, retaddr);
     }
 
-#ifndef CONFIG_USER_ONLY
     /* reset local breakpoints */
     if (env->dr[7] & DR7_LOCAL_BP_MASK) {
         cpu_x86_update_dr7(env, env->dr[7] & ~DR7_LOCAL_BP_MASK);
     }
-#endif
 }
 
 static void switch_tss(CPUX86State *env, int tss_selector,
@@ -969,68 +969,26 @@ static void do_interrupt64(CPUX86State *env, int intno, int is_int,
 #endif
 
 #ifdef TARGET_X86_64
-#if defined(CONFIG_USER_ONLY)
 void helper_syscall(CPUX86State *env, int next_eip_addend)
 {
-    CPUState *cs = env_cpu(env);
+    // Unicorn: call registered syscall hooks
+    struct hook *hook;
+    HOOK_FOREACH_VAR_DECLARE;
+    HOOK_FOREACH(env->uc, hook, UC_HOOK_INSN) {
+        if (hook->to_delete)
+            continue;
+        if (!HOOK_BOUND_CHECK(hook, env->eip))
+            continue;
+        if (hook->insn == UC_X86_INS_SYSCALL)
+            ((uc_cb_insn_syscall_t)hook->callback)(env->uc, hook->user_data);
 
-    cs->exception_index = EXCP_SYSCALL;
-    env->exception_next_eip = env->eip + next_eip_addend;
-    cpu_loop_exit(cs);
-}
-#else
-void helper_syscall(CPUX86State *env, int next_eip_addend)
-{
-    int selector;
-
-    if (!(env->efer & MSR_EFER_SCE)) {
-        raise_exception_err_ra(env, EXCP06_ILLOP, 0, GETPC());
+        // the last callback may already asked to stop emulation
+        if (env->uc->stop_request)
+            break;
     }
-    selector = (env->star >> 32) & 0xffff;
-    if (env->hflags & HF_LMA_MASK) {
-        int code64;
 
-        env->regs[R_ECX] = env->eip + next_eip_addend;
-        env->regs[11] = cpu_compute_eflags(env) & ~RF_MASK;
-
-        code64 = env->hflags & HF_CS64_MASK;
-
-        env->eflags &= ~(env->fmask | RF_MASK);
-        cpu_load_eflags(env, env->eflags, 0);
-        cpu_x86_load_seg_cache(env, R_CS, selector & 0xfffc,
-                           0, 0xffffffff,
-                               DESC_G_MASK | DESC_P_MASK |
-                               DESC_S_MASK |
-                               DESC_CS_MASK | DESC_R_MASK | DESC_A_MASK |
-                               DESC_L_MASK);
-        cpu_x86_load_seg_cache(env, R_SS, (selector + 8) & 0xfffc,
-                               0, 0xffffffff,
-                               DESC_G_MASK | DESC_B_MASK | DESC_P_MASK |
-                               DESC_S_MASK |
-                               DESC_W_MASK | DESC_A_MASK);
-        if (code64) {
-            env->eip = env->lstar;
-        } else {
-            env->eip = env->cstar;
-        }
-    } else {
-        env->regs[R_ECX] = (uint32_t)(env->eip + next_eip_addend);
-
-        env->eflags &= ~(IF_MASK | RF_MASK | VM_MASK);
-        cpu_x86_load_seg_cache(env, R_CS, selector & 0xfffc,
-                           0, 0xffffffff,
-                               DESC_G_MASK | DESC_B_MASK | DESC_P_MASK |
-                               DESC_S_MASK |
-                               DESC_CS_MASK | DESC_R_MASK | DESC_A_MASK);
-        cpu_x86_load_seg_cache(env, R_SS, (selector + 8) & 0xfffc,
-                               0, 0xffffffff,
-                               DESC_G_MASK | DESC_B_MASK | DESC_P_MASK |
-                               DESC_S_MASK |
-                               DESC_W_MASK | DESC_A_MASK);
-        env->eip = (uint32_t)env->star;
-    }
+    env->eip += next_eip_addend;
 }
-#endif
 #endif
 
 #ifdef TARGET_X86_64
@@ -1127,48 +1085,6 @@ static void do_interrupt_real(CPUX86State *env, int intno, int is_int,
     env->eflags &= ~(IF_MASK | TF_MASK | AC_MASK | RF_MASK);
 }
 
-#if defined(CONFIG_USER_ONLY)
-/* fake user mode interrupt. is_int is TRUE if coming from the int
- * instruction. next_eip is the env->eip value AFTER the interrupt
- * instruction. It is only relevant if is_int is TRUE or if intno
- * is EXCP_SYSCALL.
- */
-static void do_interrupt_user(CPUX86State *env, int intno, int is_int,
-                              int error_code, target_ulong next_eip)
-{
-    if (is_int) {
-        SegmentCache *dt;
-        target_ulong ptr;
-        int dpl, cpl, shift;
-        uint32_t e2;
-
-        dt = &env->idt;
-        if (env->hflags & HF_LMA_MASK) {
-            shift = 4;
-        } else {
-            shift = 3;
-        }
-        ptr = dt->base + (intno << shift);
-        e2 = cpu_ldl_kernel(env, ptr + 4);
-
-        dpl = (e2 >> DESC_DPL_SHIFT) & 3;
-        cpl = env->hflags & HF_CPL_MASK;
-        /* check privilege if software int */
-        if (dpl < cpl) {
-            raise_exception_err(env, EXCP0D_GPF, (intno << shift) + 2);
-        }
-    }
-
-    /* Since we emulate only user space, we cannot do more than
-       exiting the emulation with the suitable exception and error
-       code. So update EIP for INT 0x80 and EXCP_SYSCALL. */
-    if (is_int || intno == EXCP_SYSCALL) {
-        env->eip = next_eip;
-    }
-}
-
-#else
-
 static void handle_even_inj(CPUX86State *env, int intno, int is_int,
                             int error_code, int is_hw, int rm)
 {
@@ -1196,7 +1112,6 @@ static void handle_even_inj(CPUX86State *env, int intno, int is_int,
                  event_inj);
     }
 }
-#endif
 
 /*
  * Begin execution of an interruption. is_int is TRUE if coming from
@@ -1208,9 +1123,10 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
 {
     CPUX86State *env = &cpu->env;
 
+#if 0
     if (qemu_loglevel_mask(CPU_LOG_INT)) {
         if ((env->cr[0] & CR0_PE_MASK)) {
-            static int count;
+            // static int count;
 
             qemu_log("%6d: v=%02x e=%04x i=%d cpl=%d IP=%04x:" TARGET_FMT_lx
                      " pc=" TARGET_FMT_lx " SP=%04x:" TARGET_FMT_lx,
@@ -1242,12 +1158,12 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
             count++;
         }
     }
+#endif
+
     if (env->cr[0] & CR0_PE_MASK) {
-#if !defined(CONFIG_USER_ONLY)
         if (env->hflags & HF_GUEST_MASK) {
             handle_even_inj(env, intno, is_int, error_code, is_hw, 0);
         }
-#endif
 #ifdef TARGET_X86_64
         if (env->hflags & HF_LMA_MASK) {
             do_interrupt64(env, intno, is_int, error_code, next_eip, is_hw);
@@ -1258,15 +1174,12 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
                                    is_hw);
         }
     } else {
-#if !defined(CONFIG_USER_ONLY)
         if (env->hflags & HF_GUEST_MASK) {
             handle_even_inj(env, intno, is_int, error_code, is_hw, 1);
         }
-#endif
         do_interrupt_real(env, intno, is_int, error_code, next_eip);
     }
 
-#if !defined(CONFIG_USER_ONLY)
     if (env->hflags & HF_GUEST_MASK) {
         CPUState *cs = CPU(cpu);
         uint32_t event_inj = x86_ldl_phys(cs, env->vm_vmcb +
@@ -1277,7 +1190,6 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
                  env->vm_vmcb + offsetof(struct vmcb, control.event_inj),
                  event_inj & ~SVM_EVTINJ_VALID);
     }
-#endif
 }
 
 void x86_cpu_do_interrupt(CPUState *cs)
@@ -1285,17 +1197,6 @@ void x86_cpu_do_interrupt(CPUState *cs)
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
 
-#if defined(CONFIG_USER_ONLY)
-    /* if user mode only, we simulate a fake exception
-       which will be handled outside the cpu execution
-       loop */
-    do_interrupt_user(env, cs->exception_index,
-                      env->exception_is_int,
-                      env->error_code,
-                      env->exception_next_eip);
-    /* successfully delivered */
-    env->old_exception = -1;
-#else
     if (cs->exception_index >= EXCP_VMEXIT) {
         assert(env->old_exception == -1);
         do_vmexit(env, cs->exception_index - EXCP_VMEXIT, env->error_code);
@@ -1307,7 +1208,6 @@ void x86_cpu_do_interrupt(CPUState *cs)
         /* successfully delivered */
         env->old_exception = -1;
     }
-#endif
 }
 
 void do_interrupt_x86_hardirq(CPUX86State *env, int intno, int is_hw)
@@ -1330,12 +1230,10 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
      * This is required to make icount-driven execution deterministic.
      */
     switch (interrupt_request) {
-#if !defined(CONFIG_USER_ONLY)
     case CPU_INTERRUPT_POLL:
         cs->interrupt_request &= ~CPU_INTERRUPT_POLL;
-        apic_poll_irq(cpu->apic_state);
+        // apic_poll_irq(cpu->apic_state);
         break;
-#endif
     case CPU_INTERRUPT_SIPI:
         do_cpu_sipi(cpu);
         break;
@@ -1358,23 +1256,22 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         cpu_svm_check_intercept_param(env, SVM_EXIT_INTR, 0, 0);
         cs->interrupt_request &= ~(CPU_INTERRUPT_HARD |
                                    CPU_INTERRUPT_VIRQ);
-        intno = cpu_get_pic_interrupt(env);
-        qemu_log_mask(CPU_LOG_TB_IN_ASM,
-                      "Servicing hardware INT=0x%02x\n", intno);
+        // intno = cpu_get_pic_interrupt(env);
+        intno = 0;
+        //qemu_log_mask(CPU_LOG_TB_IN_ASM,
+        //              "Servicing hardware INT=0x%02x\n", intno);
         do_interrupt_x86_hardirq(env, intno, 1);
         break;
-#if !defined(CONFIG_USER_ONLY)
     case CPU_INTERRUPT_VIRQ:
         /* FIXME: this should respect TPR */
         cpu_svm_check_intercept_param(env, SVM_EXIT_VINTR, 0, 0);
         intno = x86_ldl_phys(cs, env->vm_vmcb
                              + offsetof(struct vmcb, control.int_vector));
-        qemu_log_mask(CPU_LOG_TB_IN_ASM,
-                      "Servicing virtual hardware INT=0x%02x\n", intno);
+        //qemu_log_mask(CPU_LOG_TB_IN_ASM,
+        //              "Servicing virtual hardware INT=0x%02x\n", intno);
         do_interrupt_x86_hardirq(env, intno, 1);
         cs->interrupt_request &= ~CPU_INTERRUPT_VIRQ;
         break;
-#endif
     }
 
     /* Ensure that no TB jump will be modified as the program flow was changed.  */
@@ -1496,6 +1393,84 @@ void helper_ltr(CPUX86State *env, int selector)
         cpu_stl_kernel_ra(env, ptr + 4, e2, GETPC());
     }
     env->tr.selector = selector;
+}
+
+// Unicorn: check the arguments before run cpu_x86_load_seg().
+int uc_check_cpu_x86_load_seg(CPUX86State *env, int seg_reg, int sel)
+{
+    int selector;
+    uint32_t e2;
+    int cpl, dpl, rpl;
+    SegmentCache *dt;
+    int index;
+    target_ulong ptr;
+
+    if (!(env->cr[0] & CR0_PE_MASK) || (env->eflags & VM_MASK)) {
+        return 0;
+    } else {
+        selector = sel & 0xffff;
+        cpl = env->hflags & HF_CPL_MASK;
+        if ((selector & 0xfffc) == 0) {
+            /* null selector case */
+            if (seg_reg == R_SS
+#ifdef TARGET_X86_64
+                && (!(env->hflags & HF_CS64_MASK) || cpl == 3)
+#endif
+                ) {
+                return UC_ERR_EXCEPTION;
+            }
+            return 0;
+        } else {
+            if (selector & 0x4) {
+                dt = &env->ldt;
+            } else {
+                dt = &env->gdt;
+            }
+            index = selector & ~7;
+            if ((index + 7) > dt->limit) {
+                return UC_ERR_EXCEPTION;
+            }
+            ptr = dt->base + index;
+            e2 = cpu_ldl_kernel(env, ptr + 4);
+
+            if (!(e2 & DESC_S_MASK)) {
+                return UC_ERR_EXCEPTION;
+            }
+            rpl = selector & 3;
+            dpl = (e2 >> DESC_DPL_SHIFT) & 3;
+            if (seg_reg == R_SS) {
+                /* must be writable segment */
+                if ((e2 & DESC_CS_MASK) || !(e2 & DESC_W_MASK)) {
+                    return UC_ERR_EXCEPTION;
+                }
+                if (rpl != cpl || dpl != cpl) {
+                    return UC_ERR_EXCEPTION;
+                }
+            } else {
+                /* must be readable segment */
+                if ((e2 & (DESC_CS_MASK | DESC_R_MASK)) == DESC_CS_MASK) {
+                    return UC_ERR_EXCEPTION;
+                }
+
+                if (!(e2 & DESC_CS_MASK) || !(e2 & DESC_C_MASK)) {
+                    /* if not conforming code, test rights */
+                    if (dpl < cpl || dpl < rpl) {
+                        return UC_ERR_EXCEPTION;
+                    }
+                }
+            }
+
+            if (!(e2 & DESC_P_MASK)) {
+                if (seg_reg == R_SS) {
+                    return UC_ERR_EXCEPTION;
+                } else {
+                    return UC_ERR_EXCEPTION;
+                }
+            }
+        }
+    }
+
+    return 0;
 }
 
 /* only works if protected mode and not VM86. seg_reg must be != R_CS */
@@ -2369,37 +2344,25 @@ void helper_lret_protected(CPUX86State *env, int shift, int addend)
     helper_ret_protected(env, shift, 0, addend, GETPC());
 }
 
-void helper_sysenter(CPUX86State *env)
+void helper_sysenter(CPUX86State *env, int next_eip_addend)
 {
-    if (env->sysenter_cs == 0) {
-        raise_exception_err_ra(env, EXCP0D_GPF, 0, GETPC());
-    }
-    env->eflags &= ~(VM_MASK | IF_MASK | RF_MASK);
+    // Unicorn: call registered SYSENTER hooks
+    struct hook *hook;
+    HOOK_FOREACH_VAR_DECLARE;
+    HOOK_FOREACH(env->uc, hook, UC_HOOK_INSN) {
+        if (hook->to_delete)
+            continue;
+        if (!HOOK_BOUND_CHECK(hook, env->eip))
+            continue;
+        if (hook->insn == UC_X86_INS_SYSENTER)
+            ((uc_cb_insn_syscall_t)hook->callback)(env->uc, hook->user_data);
 
-#ifdef TARGET_X86_64
-    if (env->hflags & HF_LMA_MASK) {
-        cpu_x86_load_seg_cache(env, R_CS, env->sysenter_cs & 0xfffc,
-                               0, 0xffffffff,
-                               DESC_G_MASK | DESC_B_MASK | DESC_P_MASK |
-                               DESC_S_MASK |
-                               DESC_CS_MASK | DESC_R_MASK | DESC_A_MASK |
-                               DESC_L_MASK);
-    } else
-#endif
-    {
-        cpu_x86_load_seg_cache(env, R_CS, env->sysenter_cs & 0xfffc,
-                               0, 0xffffffff,
-                               DESC_G_MASK | DESC_B_MASK | DESC_P_MASK |
-                               DESC_S_MASK |
-                               DESC_CS_MASK | DESC_R_MASK | DESC_A_MASK);
+        // the last callback may already asked to stop emulation
+        if (env->uc->stop_request)
+            break;
     }
-    cpu_x86_load_seg_cache(env, R_SS, (env->sysenter_cs + 8) & 0xfffc,
-                           0, 0xffffffff,
-                           DESC_G_MASK | DESC_B_MASK | DESC_P_MASK |
-                           DESC_S_MASK |
-                           DESC_W_MASK | DESC_A_MASK);
-    env->regs[R_ESP] = env->sysenter_esp;
-    env->eip = env->sysenter_eip;
+
+    env->eip += next_eip_addend;
 }
 
 void helper_sysexit(CPUX86State *env, int dflag)
@@ -2610,7 +2573,6 @@ void helper_verw(CPUX86State *env, target_ulong selector1)
     CC_SRC = eflags | CC_Z;
 }
 
-#if defined(CONFIG_USER_ONLY)
 void cpu_x86_load_seg(CPUX86State *env, int seg_reg, int selector)
 {
     if (!(env->cr[0] & CR0_PE_MASK) || (env->eflags & VM_MASK)) {
@@ -2624,7 +2586,6 @@ void cpu_x86_load_seg(CPUX86State *env, int seg_reg, int selector)
         helper_load_seg(env, seg_reg, selector);
     }
 }
-#endif
 
 /* check if Port I/O is allowed in TSS */
 static inline void check_io(CPUX86State *env, int addr, int size,

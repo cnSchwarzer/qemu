@@ -1,8 +1,6 @@
 #ifndef MMU_HASH32_H
 #define MMU_HASH32_H
 
-#ifndef CONFIG_USER_ONLY
-
 hwaddr get_pteg_offset32(PowerPCCPU *cpu, hwaddr hash);
 hwaddr ppc_hash32_get_phys_page_debug(PowerPCCPU *cpu, target_ulong addr);
 int ppc_hash32_handle_mmu_fault(PowerPCCPU *cpu, vaddr address, int rw,
@@ -82,7 +80,11 @@ static inline target_ulong ppc_hash32_load_hpte0(PowerPCCPU *cpu,
 {
     target_ulong base = ppc_hash32_hpt_base(cpu);
 
-    return ldl_phys(CPU(cpu)->as, base + pte_offset);
+#ifdef UNICORN_ARCH_POSTFIX
+    return glue(ldl_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + pte_offset);
+#else
+    return ldl_phys(cpu->env.uc, CPU(cpu)->as, base + pte_offset);
+#endif
 }
 
 static inline target_ulong ppc_hash32_load_hpte1(PowerPCCPU *cpu,
@@ -90,7 +92,11 @@ static inline target_ulong ppc_hash32_load_hpte1(PowerPCCPU *cpu,
 {
     target_ulong base = ppc_hash32_hpt_base(cpu);
 
-    return ldl_phys(CPU(cpu)->as, base + pte_offset + HASH_PTE_SIZE_32 / 2);
+#ifdef UNICORN_ARCH_POSTFIX
+    return glue(ldl_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + pte_offset + HASH_PTE_SIZE_32 / 2);
+#else
+    return ldl_phys(cpu->env.uc, CPU(cpu)->as, base + pte_offset + HASH_PTE_SIZE_32 / 2);
+#endif
 }
 
 static inline void ppc_hash32_store_hpte0(PowerPCCPU *cpu,
@@ -98,7 +104,11 @@ static inline void ppc_hash32_store_hpte0(PowerPCCPU *cpu,
 {
     target_ulong base = ppc_hash32_hpt_base(cpu);
 
-    stl_phys(CPU(cpu)->as, base + pte_offset, pte0);
+#ifdef UNICORN_ARCH_POSTFIX
+    glue(stl_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + pte_offset, pte0);
+#else
+    stl_phys(cpu->env.uc, CPU(cpu)->as, base + pte_offset, pte0);
+#endif
 }
 
 static inline void ppc_hash32_store_hpte1(PowerPCCPU *cpu,
@@ -106,13 +116,15 @@ static inline void ppc_hash32_store_hpte1(PowerPCCPU *cpu,
 {
     target_ulong base = ppc_hash32_hpt_base(cpu);
 
-    stl_phys(CPU(cpu)->as, base + pte_offset + HASH_PTE_SIZE_32 / 2, pte1);
+#ifdef UNICORN_ARCH_POSTFIX
+    glue(stl_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + pte_offset + HASH_PTE_SIZE_32 / 2, pte1);
+#else
+    stl_phys(cpu->env.uc, CPU(cpu)->as, base + pte_offset + HASH_PTE_SIZE_32 / 2, pte1);
+#endif
 }
 
 typedef struct {
     uint32_t pte0, pte1;
 } ppc_hash_pte32_t;
-
-#endif /* CONFIG_USER_ONLY */
 
 #endif /* MMU_HASH32_H */

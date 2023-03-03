@@ -13,22 +13,9 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "internal.h"
-#include "kvm_s390x.h"
-#include "sysemu/kvm.h"
 #include "sysemu/tcg.h"
-#include "qapi/error.h"
-#include "qapi/visitor.h"
-#include "qemu/error-report.h"
-#include "qemu/module.h"
-#include "qemu/qemu-print.h"
-#include "qapi/qmp/qerror.h"
-#include "qapi/qobject-input-visitor.h"
-#include "qapi/qmp/qdict.h"
-#ifndef CONFIG_USER_ONLY
-#include "sysemu/arch_init.h"
-#include "hw/pci/pci.h"
-#endif
-#include "qapi/qapi-commands-machine-target.h"
+#include "qemu-common.h"
+//#include "hw/pci/pci.h"
 
 #define CPUDEF_INIT(_type, _gen, _ec_ga, _mha_pow, _hmfai, _name, _desc) \
     {                                                                    \
@@ -152,7 +139,7 @@ uint32_t s390_get_hmfai(void)
     static S390CPU *cpu;
 
     if (!cpu) {
-        cpu = S390_CPU(qemu_get_cpu(0));
+        cpu = S390_CPU(qemu_get_cpu(NULL, 0));
     }
 
     if (!cpu || !cpu->model) {
@@ -166,7 +153,7 @@ uint8_t s390_get_mha_pow(void)
     static S390CPU *cpu;
 
     if (!cpu) {
-        cpu = S390_CPU(qemu_get_cpu(0));
+        cpu = S390_CPU(qemu_get_cpu(NULL, 0));
     }
 
     if (!cpu || !cpu->model) {
@@ -181,7 +168,7 @@ uint32_t s390_get_ibc_val(void)
     static S390CPU *cpu;
 
     if (!cpu) {
-        cpu = S390_CPU(qemu_get_cpu(0));
+        cpu = S390_CPU(qemu_get_cpu(NULL, 0));
     }
 
     if (!cpu || !cpu->model) {
@@ -196,47 +183,20 @@ uint32_t s390_get_ibc_val(void)
     return ((uint32_t) lowest_ibc << 16) | unblocked_ibc;
 }
 
-void s390_get_feat_block(S390FeatType type, uint8_t *data)
+void s390_get_feat_block(struct uc_struct *uc, S390FeatType type, uint8_t *data)
 {
-    static S390CPU *cpu;
-
-    if (!cpu) {
-        cpu = S390_CPU(qemu_get_cpu(0));
-    }
-
-    if (!cpu || !cpu->model) {
-        return;
-    }
+    S390CPU *cpu = S390_CPU(qemu_get_cpu(uc, 0));
     s390_fill_feat_block(cpu->model->features, type, data);
 }
 
-bool s390_has_feat(S390Feat feat)
+bool s390_has_feat(struct uc_struct *uc, S390Feat feat)
 {
-    static S390CPU *cpu;
-
-    if (!cpu) {
-        cpu = S390_CPU(qemu_get_cpu(0));
-    }
-
-    if (!cpu || !cpu->model) {
-#ifdef CONFIG_KVM
-        if (kvm_enabled()) {
-            if (feat == S390_FEAT_VECTOR) {
-                return kvm_check_extension(kvm_state,
-                                           KVM_CAP_S390_VECTOR_REGISTERS);
-            }
-            if (feat == S390_FEAT_RUNTIME_INSTRUMENTATION) {
-                return kvm_s390_get_ri();
-            }
-            if (feat == S390_FEAT_MSA_EXT_3) {
-                return true;
-            }
-        }
-#endif
+    S390CPU *cpu = S390_CPU(qemu_get_cpu(uc, 0));
+    if (!cpu->model) {
         if (feat == S390_FEAT_ZPCI) {
             return true;
         }
-        return 0;
+        return false;
     }
     return test_bit(feat, cpu->model->features);
 }
@@ -310,574 +270,10 @@ const S390CPUDef *s390_find_cpu_def(uint16_t type, uint8_t gen, uint8_t ec_ga,
     return last_compatible;
 }
 
-static void s390_print_cpu_model_list_entry(gpointer data, gpointer user_data)
+static S390CPUModel *get_max_cpu_model(void);
+
+static S390CPUModel *get_max_cpu_model(void)
 {
-    const S390CPUClass *scc = S390_CPU_CLASS((ObjectClass *)data);
-    char *name = g_strdup(object_class_get_name((ObjectClass *)data));
-    const char *details = "";
-
-    if (scc->is_static) {
-        details = "(static, migration-safe)";
-    } else if (scc->is_migration_safe) {
-        details = "(migration-safe)";
-    }
-
-    /* strip off the -s390x-cpu */
-    g_strrstr(name, "-" TYPE_S390_CPU)[0] = 0;
-    qemu_printf("s390 %-15s %-35s %s\n", name, scc->desc, details);
-    g_free(name);
-}
-
-static gint s390_cpu_list_compare(gconstpointer a, gconstpointer b)
-{
-    const S390CPUClass *cc_a = S390_CPU_CLASS((ObjectClass *)a);
-    const S390CPUClass *cc_b = S390_CPU_CLASS((ObjectClass *)b);
-    const char *name_a = object_class_get_name((ObjectClass *)a);
-    const char *name_b = object_class_get_name((ObjectClass *)b);
-
-    /*
-     * Move qemu, host and max to the top of the list, qemu first, host second,
-     * max third.
-     */
-    if (name_a[0] == 'q') {
-        return -1;
-    } else if (name_b[0] == 'q') {
-        return 1;
-    } else if (name_a[0] == 'h') {
-        return -1;
-    } else if (name_b[0] == 'h') {
-        return 1;
-    } else if (name_a[0] == 'm') {
-        return -1;
-    } else if (name_b[0] == 'm') {
-        return 1;
-    }
-
-    /* keep the same order we have in our table (sorted by release date) */
-    if (cc_a->cpu_def != cc_b->cpu_def) {
-        return cc_a->cpu_def - cc_b->cpu_def;
-    }
-
-    /* exact same definition - list base model first */
-    return cc_a->is_static ? -1 : 1;
-}
-
-void s390_cpu_list(void)
-{
-    S390FeatGroup group;
-    S390Feat feat;
-    GSList *list;
-
-    list = object_class_get_list(TYPE_S390_CPU, false);
-    list = g_slist_sort(list, s390_cpu_list_compare);
-    g_slist_foreach(list, s390_print_cpu_model_list_entry, NULL);
-    g_slist_free(list);
-
-    qemu_printf("\nRecognized feature flags:\n");
-    for (feat = 0; feat < S390_FEAT_MAX; feat++) {
-        const S390FeatDef *def = s390_feat_def(feat);
-
-        qemu_printf("%-20s %-50s\n", def->name, def->desc);
-    }
-
-    qemu_printf("\nRecognized feature groups:\n");
-    for (group = 0; group < S390_FEAT_GROUP_MAX; group++) {
-        const S390FeatGroupDef *def = s390_feat_group_def(group);
-
-        qemu_printf("%-20s %-50s\n", def->name, def->desc);
-    }
-}
-
-static S390CPUModel *get_max_cpu_model(Error **errp);
-
-#ifndef CONFIG_USER_ONLY
-static void list_add_feat(const char *name, void *opaque);
-
-static void check_unavailable_features(const S390CPUModel *max_model,
-                                       const S390CPUModel *model,
-                                       strList **unavailable)
-{
-    S390FeatBitmap missing;
-
-    /* check general model compatibility */
-    if (max_model->def->gen < model->def->gen ||
-        (max_model->def->gen == model->def->gen &&
-         max_model->def->ec_ga < model->def->ec_ga)) {
-        list_add_feat("type", unavailable);
-    }
-
-    /* detect missing features if any to properly report them */
-    bitmap_andnot(missing, model->features, max_model->features,
-                  S390_FEAT_MAX);
-    if (!bitmap_empty(missing, S390_FEAT_MAX)) {
-        s390_feat_bitmap_to_ascii(missing, unavailable, list_add_feat);
-    }
-}
-
-struct CpuDefinitionInfoListData {
-    CpuDefinitionInfoList *list;
-    S390CPUModel *model;
-};
-
-static void create_cpu_model_list(ObjectClass *klass, void *opaque)
-{
-    struct CpuDefinitionInfoListData *cpu_list_data = opaque;
-    CpuDefinitionInfoList **cpu_list = &cpu_list_data->list;
-    CpuDefinitionInfoList *entry;
-    CpuDefinitionInfo *info;
-    char *name = g_strdup(object_class_get_name(klass));
-    S390CPUClass *scc = S390_CPU_CLASS(klass);
-
-    /* strip off the -s390x-cpu */
-    g_strrstr(name, "-" TYPE_S390_CPU)[0] = 0;
-    info = g_new0(CpuDefinitionInfo, 1);
-    info->name = name;
-    info->has_migration_safe = true;
-    info->migration_safe = scc->is_migration_safe;
-    info->q_static = scc->is_static;
-    info->q_typename = g_strdup(object_class_get_name(klass));
-    /* check for unavailable features */
-    if (cpu_list_data->model) {
-        Object *obj;
-        S390CPU *sc;
-        obj = object_new_with_class(klass);
-        sc = S390_CPU(obj);
-        if (sc->model) {
-            info->has_unavailable_features = true;
-            check_unavailable_features(cpu_list_data->model, sc->model,
-                                       &info->unavailable_features);
-        }
-        object_unref(obj);
-    }
-
-    entry = g_new0(CpuDefinitionInfoList, 1);
-    entry->value = info;
-    entry->next = *cpu_list;
-    *cpu_list = entry;
-}
-
-CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
-{
-    struct CpuDefinitionInfoListData list_data = {
-        .list = NULL,
-    };
-
-    list_data.model = get_max_cpu_model(NULL);
-
-    object_class_foreach(create_cpu_model_list, TYPE_S390_CPU, false,
-                         &list_data);
-
-    return list_data.list;
-}
-
-static void cpu_model_from_info(S390CPUModel *model, const CpuModelInfo *info,
-                                Error **errp)
-{
-    Error *err = NULL;
-    const QDict *qdict = NULL;
-    const QDictEntry *e;
-    Visitor *visitor;
-    ObjectClass *oc;
-    S390CPU *cpu;
-    Object *obj;
-
-    if (info->props) {
-        qdict = qobject_to(QDict, info->props);
-        if (!qdict) {
-            error_setg(errp, QERR_INVALID_PARAMETER_TYPE, "props", "dict");
-            return;
-        }
-    }
-
-    oc = cpu_class_by_name(TYPE_S390_CPU, info->name);
-    if (!oc) {
-        error_setg(errp, "The CPU definition \'%s\' is unknown.", info->name);
-        return;
-    }
-    if (S390_CPU_CLASS(oc)->kvm_required && !kvm_enabled()) {
-        error_setg(errp, "The CPU definition '%s' requires KVM", info->name);
-        return;
-    }
-    obj = object_new_with_class(oc);
-    cpu = S390_CPU(obj);
-
-    if (!cpu->model) {
-        error_setg(errp, "Details about the host CPU model are not available, "
-                         "it cannot be used.");
-        object_unref(obj);
-        return;
-    }
-
-    if (qdict) {
-        visitor = qobject_input_visitor_new(info->props);
-        visit_start_struct(visitor, NULL, NULL, 0, &err);
-        if (err) {
-            error_propagate(errp, err);
-            visit_free(visitor);
-            object_unref(obj);
-            return;
-        }
-        for (e = qdict_first(qdict); e; e = qdict_next(qdict, e)) {
-            object_property_set(obj, visitor, e->key, &err);
-            if (err) {
-                break;
-            }
-        }
-        if (!err) {
-            visit_check_struct(visitor, errp);
-        }
-        visit_end_struct(visitor, NULL);
-        visit_free(visitor);
-        if (err) {
-            error_propagate(errp, err);
-            object_unref(obj);
-            return;
-        }
-    }
-
-    /* copy the model and throw the cpu away */
-    memcpy(model, cpu->model, sizeof(*model));
-    object_unref(obj);
-}
-
-static void qdict_add_disabled_feat(const char *name, void *opaque)
-{
-    qdict_put_bool(opaque, name, false);
-}
-
-static void qdict_add_enabled_feat(const char *name, void *opaque)
-{
-    qdict_put_bool(opaque, name, true);
-}
-
-/* convert S390CPUDef into a static CpuModelInfo */
-static void cpu_info_from_model(CpuModelInfo *info, const S390CPUModel *model,
-                                bool delta_changes)
-{
-    QDict *qdict = qdict_new();
-    S390FeatBitmap bitmap;
-
-    /* always fallback to the static base model */
-    info->name = g_strdup_printf("%s-base", model->def->name);
-
-    if (delta_changes) {
-        /* features deleted from the base feature set */
-        bitmap_andnot(bitmap, model->def->base_feat, model->features,
-                      S390_FEAT_MAX);
-        if (!bitmap_empty(bitmap, S390_FEAT_MAX)) {
-            s390_feat_bitmap_to_ascii(bitmap, qdict, qdict_add_disabled_feat);
-        }
-
-        /* features added to the base feature set */
-        bitmap_andnot(bitmap, model->features, model->def->base_feat,
-                      S390_FEAT_MAX);
-        if (!bitmap_empty(bitmap, S390_FEAT_MAX)) {
-            s390_feat_bitmap_to_ascii(bitmap, qdict, qdict_add_enabled_feat);
-        }
-    } else {
-        /* expand all features */
-        s390_feat_bitmap_to_ascii(model->features, qdict,
-                                  qdict_add_enabled_feat);
-        bitmap_complement(bitmap, model->features, S390_FEAT_MAX);
-        s390_feat_bitmap_to_ascii(bitmap, qdict, qdict_add_disabled_feat);
-    }
-
-    if (!qdict_size(qdict)) {
-        qobject_unref(qdict);
-    } else {
-        info->props = QOBJECT(qdict);
-        info->has_props = true;
-    }
-}
-
-CpuModelExpansionInfo *qmp_query_cpu_model_expansion(CpuModelExpansionType type,
-                                                      CpuModelInfo *model,
-                                                      Error **errp)
-{
-    Error *err = NULL;
-    CpuModelExpansionInfo *expansion_info = NULL;
-    S390CPUModel s390_model;
-    bool delta_changes = false;
-
-    /* convert it to our internal representation */
-    cpu_model_from_info(&s390_model, model, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return NULL;
-    }
-
-    if (type == CPU_MODEL_EXPANSION_TYPE_STATIC) {
-        delta_changes = true;
-    } else if (type != CPU_MODEL_EXPANSION_TYPE_FULL) {
-        error_setg(errp, "The requested expansion type is not supported.");
-        return NULL;
-    }
-
-    /* convert it back to a static representation */
-    expansion_info = g_new0(CpuModelExpansionInfo, 1);
-    expansion_info->model = g_malloc0(sizeof(*expansion_info->model));
-    cpu_info_from_model(expansion_info->model, &s390_model, delta_changes);
-    return expansion_info;
-}
-
-static void list_add_feat(const char *name, void *opaque)
-{
-    strList **last = (strList **) opaque;
-    strList *entry;
-
-    entry = g_new0(strList, 1);
-    entry->value = g_strdup(name);
-    entry->next = *last;
-    *last = entry;
-}
-
-CpuModelCompareInfo *qmp_query_cpu_model_comparison(CpuModelInfo *infoa,
-                                                     CpuModelInfo *infob,
-                                                     Error **errp)
-{
-    Error *err = NULL;
-    CpuModelCompareResult feat_result, gen_result;
-    CpuModelCompareInfo *compare_info;
-    S390FeatBitmap missing, added;
-    S390CPUModel modela, modelb;
-
-    /* convert both models to our internal representation */
-    cpu_model_from_info(&modela, infoa, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return NULL;
-    }
-    cpu_model_from_info(&modelb, infob, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return NULL;
-    }
-    compare_info = g_new0(CpuModelCompareInfo, 1);
-
-    /* check the cpu generation and ga level */
-    if (modela.def->gen == modelb.def->gen) {
-        if (modela.def->ec_ga == modelb.def->ec_ga) {
-            /* ec and corresponding bc are identical */
-            gen_result = CPU_MODEL_COMPARE_RESULT_IDENTICAL;
-        } else if (modela.def->ec_ga < modelb.def->ec_ga) {
-            gen_result = CPU_MODEL_COMPARE_RESULT_SUBSET;
-        } else {
-            gen_result = CPU_MODEL_COMPARE_RESULT_SUPERSET;
-        }
-    } else if (modela.def->gen < modelb.def->gen) {
-        gen_result = CPU_MODEL_COMPARE_RESULT_SUBSET;
-    } else {
-        gen_result = CPU_MODEL_COMPARE_RESULT_SUPERSET;
-    }
-    if (gen_result != CPU_MODEL_COMPARE_RESULT_IDENTICAL) {
-        /* both models cannot be made identical */
-        list_add_feat("type", &compare_info->responsible_properties);
-    }
-
-    /* check the feature set */
-    if (bitmap_equal(modela.features, modelb.features, S390_FEAT_MAX)) {
-        feat_result = CPU_MODEL_COMPARE_RESULT_IDENTICAL;
-    } else {
-        bitmap_andnot(missing, modela.features, modelb.features, S390_FEAT_MAX);
-        s390_feat_bitmap_to_ascii(missing,
-                                  &compare_info->responsible_properties,
-                                  list_add_feat);
-        bitmap_andnot(added, modelb.features, modela.features, S390_FEAT_MAX);
-        s390_feat_bitmap_to_ascii(added, &compare_info->responsible_properties,
-                                  list_add_feat);
-        if (bitmap_empty(missing, S390_FEAT_MAX)) {
-            feat_result = CPU_MODEL_COMPARE_RESULT_SUBSET;
-        } else if (bitmap_empty(added, S390_FEAT_MAX)) {
-            feat_result = CPU_MODEL_COMPARE_RESULT_SUPERSET;
-        } else {
-            feat_result = CPU_MODEL_COMPARE_RESULT_INCOMPATIBLE;
-        }
-    }
-
-    /* combine the results */
-    if (gen_result == feat_result) {
-        compare_info->result = gen_result;
-    } else if (feat_result == CPU_MODEL_COMPARE_RESULT_IDENTICAL) {
-        compare_info->result = gen_result;
-    } else if (gen_result == CPU_MODEL_COMPARE_RESULT_IDENTICAL) {
-        compare_info->result = feat_result;
-    } else {
-        compare_info->result = CPU_MODEL_COMPARE_RESULT_INCOMPATIBLE;
-    }
-    return compare_info;
-}
-
-CpuModelBaselineInfo *qmp_query_cpu_model_baseline(CpuModelInfo *infoa,
-                                                    CpuModelInfo *infob,
-                                                    Error **errp)
-{
-    Error *err = NULL;
-    CpuModelBaselineInfo *baseline_info;
-    S390CPUModel modela, modelb, model;
-    uint16_t cpu_type;
-    uint8_t max_gen_ga;
-    uint8_t max_gen;
-
-    /* convert both models to our internal representation */
-    cpu_model_from_info(&modela, infoa, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return NULL;
-    }
-
-    cpu_model_from_info(&modelb, infob, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return NULL;
-    }
-
-    /* features both models support */
-    bitmap_and(model.features, modela.features, modelb.features, S390_FEAT_MAX);
-
-    /* detect the maximum model not regarding features */
-    if (modela.def->gen == modelb.def->gen) {
-        if (modela.def->type == modelb.def->type) {
-            cpu_type = modela.def->type;
-        } else {
-            cpu_type = 0;
-        }
-        max_gen = modela.def->gen;
-        max_gen_ga = MIN(modela.def->ec_ga, modelb.def->ec_ga);
-    } else if (modela.def->gen > modelb.def->gen) {
-        cpu_type = modelb.def->type;
-        max_gen = modelb.def->gen;
-        max_gen_ga = modelb.def->ec_ga;
-    } else {
-        cpu_type = modela.def->type;
-        max_gen = modela.def->gen;
-        max_gen_ga = modela.def->ec_ga;
-    }
-
-    model.def = s390_find_cpu_def(cpu_type, max_gen, max_gen_ga,
-                                  model.features);
-
-    /* models without early base features (esan3) are bad */
-    if (!model.def) {
-        error_setg(errp, "No compatible CPU model could be created as"
-                   " important base features are disabled");
-        return NULL;
-    }
-
-    /* strip off features not part of the max model */
-    bitmap_and(model.features, model.features, model.def->full_feat,
-               S390_FEAT_MAX);
-
-    baseline_info = g_new0(CpuModelBaselineInfo, 1);
-    baseline_info->model = g_malloc0(sizeof(*baseline_info->model));
-    cpu_info_from_model(baseline_info->model, &model, true);
-    return baseline_info;
-}
-#endif
-
-static void check_consistency(const S390CPUModel *model)
-{
-    static int dep[][2] = {
-        { S390_FEAT_IPTE_RANGE, S390_FEAT_DAT_ENH },
-        { S390_FEAT_IDTE_SEGMENT, S390_FEAT_DAT_ENH },
-        { S390_FEAT_IDTE_REGION, S390_FEAT_DAT_ENH },
-        { S390_FEAT_IDTE_REGION, S390_FEAT_IDTE_SEGMENT },
-        { S390_FEAT_LOCAL_TLB_CLEARING, S390_FEAT_DAT_ENH},
-        { S390_FEAT_LONG_DISPLACEMENT_FAST, S390_FEAT_LONG_DISPLACEMENT },
-        { S390_FEAT_DFP_FAST, S390_FEAT_DFP },
-        { S390_FEAT_TRANSACTIONAL_EXE, S390_FEAT_STFLE_49 },
-        { S390_FEAT_EDAT_2, S390_FEAT_EDAT},
-        { S390_FEAT_MSA_EXT_5, S390_FEAT_KIMD_SHA_512 },
-        { S390_FEAT_MSA_EXT_5, S390_FEAT_KLMD_SHA_512 },
-        { S390_FEAT_MSA_EXT_4, S390_FEAT_MSA_EXT_3 },
-        { S390_FEAT_SIE_CMMA, S390_FEAT_CMM },
-        { S390_FEAT_SIE_CMMA, S390_FEAT_SIE_GSLS },
-        { S390_FEAT_SIE_PFMFI, S390_FEAT_EDAT },
-        { S390_FEAT_MSA_EXT_8, S390_FEAT_MSA_EXT_3 },
-        { S390_FEAT_MSA_EXT_9, S390_FEAT_MSA_EXT_3 },
-        { S390_FEAT_MSA_EXT_9, S390_FEAT_MSA_EXT_4 },
-        { S390_FEAT_MULTIPLE_EPOCH, S390_FEAT_TOD_CLOCK_STEERING },
-        { S390_FEAT_VECTOR_PACKED_DECIMAL, S390_FEAT_VECTOR },
-        { S390_FEAT_VECTOR_ENH, S390_FEAT_VECTOR },
-        { S390_FEAT_INSTRUCTION_EXEC_PROT, S390_FEAT_SIDE_EFFECT_ACCESS_ESOP2 },
-        { S390_FEAT_SIDE_EFFECT_ACCESS_ESOP2, S390_FEAT_ESOP },
-        { S390_FEAT_CMM_NT, S390_FEAT_CMM },
-        { S390_FEAT_GUARDED_STORAGE, S390_FEAT_SIDE_EFFECT_ACCESS_ESOP2 },
-        { S390_FEAT_MULTIPLE_EPOCH, S390_FEAT_STORE_CLOCK_FAST },
-        { S390_FEAT_MULTIPLE_EPOCH, S390_FEAT_TOD_CLOCK_STEERING },
-        { S390_FEAT_SEMAPHORE_ASSIST, S390_FEAT_STFLE_49 },
-        { S390_FEAT_KIMD_SHA3_224, S390_FEAT_MSA },
-        { S390_FEAT_KIMD_SHA3_256, S390_FEAT_MSA },
-        { S390_FEAT_KIMD_SHA3_384, S390_FEAT_MSA },
-        { S390_FEAT_KIMD_SHA3_512, S390_FEAT_MSA },
-        { S390_FEAT_KIMD_SHAKE_128, S390_FEAT_MSA },
-        { S390_FEAT_KIMD_SHAKE_256, S390_FEAT_MSA },
-        { S390_FEAT_KLMD_SHA3_224, S390_FEAT_MSA },
-        { S390_FEAT_KLMD_SHA3_256, S390_FEAT_MSA },
-        { S390_FEAT_KLMD_SHA3_384, S390_FEAT_MSA },
-        { S390_FEAT_KLMD_SHA3_512, S390_FEAT_MSA },
-        { S390_FEAT_KLMD_SHAKE_128, S390_FEAT_MSA },
-        { S390_FEAT_KLMD_SHAKE_256, S390_FEAT_MSA },
-        { S390_FEAT_PRNO_TRNG_QRTCR, S390_FEAT_MSA_EXT_5 },
-        { S390_FEAT_PRNO_TRNG, S390_FEAT_MSA_EXT_5 },
-        { S390_FEAT_SIE_KSS, S390_FEAT_SIE_F2 },
-        { S390_FEAT_AP_QUERY_CONFIG_INFO, S390_FEAT_AP },
-        { S390_FEAT_AP_FACILITIES_TEST, S390_FEAT_AP },
-        { S390_FEAT_PTFF_QSIE, S390_FEAT_MULTIPLE_EPOCH },
-        { S390_FEAT_PTFF_QTOUE, S390_FEAT_MULTIPLE_EPOCH },
-        { S390_FEAT_PTFF_STOE, S390_FEAT_MULTIPLE_EPOCH },
-        { S390_FEAT_PTFF_STOUE, S390_FEAT_MULTIPLE_EPOCH },
-        { S390_FEAT_AP_QUEUE_INTERRUPT_CONTROL, S390_FEAT_AP },
-    };
-    int i;
-
-    for (i = 0; i < ARRAY_SIZE(dep); i++) {
-        if (test_bit(dep[i][0], model->features) &&
-            !test_bit(dep[i][1], model->features)) {
-            warn_report("\'%s\' requires \'%s\'.",
-                        s390_feat_def(dep[i][0])->name,
-                        s390_feat_def(dep[i][1])->name);
-        }
-    }
-}
-
-static void error_prepend_missing_feat(const char *name, void *opaque)
-{
-    error_prepend((Error **) opaque, "%s ", name);
-}
-
-static void check_compatibility(const S390CPUModel *max_model,
-                                const S390CPUModel *model, Error **errp)
-{
-    S390FeatBitmap missing;
-
-    if (model->def->gen > max_model->def->gen) {
-        error_setg(errp, "Selected CPU generation is too new. Maximum "
-                   "supported model in the configuration: \'%s\'",
-                   max_model->def->name);
-        return;
-    } else if (model->def->gen == max_model->def->gen &&
-               model->def->ec_ga > max_model->def->ec_ga) {
-        error_setg(errp, "Selected CPU GA level is too new. Maximum "
-                   "supported model in the configuration: \'%s\'",
-                   max_model->def->name);
-        return;
-    }
-
-    /* detect the missing features to properly report them */
-    bitmap_andnot(missing, model->features, max_model->features, S390_FEAT_MAX);
-    if (bitmap_empty(missing, S390_FEAT_MAX)) {
-        return;
-    }
-
-    error_setg(errp, " ");
-    s390_feat_bitmap_to_ascii(missing, errp, error_prepend_missing_feat);
-    error_prepend(errp, "Some features requested in the CPU model are not "
-                  "available in the configuration: ");
-}
-
-static S390CPUModel *get_max_cpu_model(Error **errp)
-{
-    Error *err = NULL;
     static S390CPUModel max_model;
     static bool cached;
 
@@ -885,25 +281,15 @@ static S390CPUModel *get_max_cpu_model(Error **errp)
         return &max_model;
     }
 
-    if (kvm_enabled()) {
-        kvm_s390_get_host_cpu_model(&max_model, &err);
-    } else {
-        max_model.def = s390_find_cpu_def(QEMU_MAX_CPU_TYPE, QEMU_MAX_CPU_GEN,
-                                          QEMU_MAX_CPU_EC_GA, NULL);
-        bitmap_copy(max_model.features, qemu_max_cpu_feat, S390_FEAT_MAX);
-    }
-    if (err) {
-        error_propagate(errp, err);
-        return NULL;
-    }
+    max_model.def = s390_find_cpu_def(QEMU_MAX_CPU_TYPE, QEMU_MAX_CPU_GEN,
+            QEMU_MAX_CPU_EC_GA, NULL);
+    bitmap_copy(max_model.features, qemu_max_cpu_feat, S390_FEAT_MAX);
     cached = true;
     return &max_model;
 }
 
-static inline void apply_cpu_model(const S390CPUModel *model, Error **errp)
+static inline void apply_cpu_model(const S390CPUModel *model)
 {
-#ifndef CONFIG_USER_ONLY
-    Error *err = NULL;
     static S390CPUModel applied_model;
     static bool applied;
 
@@ -913,47 +299,31 @@ static inline void apply_cpu_model(const S390CPUModel *model, Error **errp)
      */
     if (applied) {
         if (model && memcmp(&applied_model, model, sizeof(S390CPUModel))) {
-            error_setg(errp, "Mixed CPU models are not supported on s390x.");
+            // error_setg(errp, "Mixed CPU models are not supported on s390x.");
         }
         return;
-    }
-
-    if (kvm_enabled()) {
-        kvm_s390_apply_cpu_model(model, &err);
-        if (err) {
-            error_propagate(errp, err);
-            return;
-        }
     }
 
     applied = true;
     if (model) {
         applied_model = *model;
     }
-#endif
 }
 
-void s390_realize_cpu_model(CPUState *cs, Error **errp)
+void s390_realize_cpu_model(CPUState *cs)
 {
-    Error *err = NULL;
-    S390CPUClass *xcc = S390_CPU_GET_CLASS(cs);
     S390CPU *cpu = S390_CPU(cs);
     const S390CPUModel *max_model;
 
-    if (xcc->kvm_required && !kvm_enabled()) {
-        error_setg(errp, "CPU definition requires KVM");
-        return;
-    }
-
     if (!cpu->model) {
         /* no host model support -> perform compatibility stuff */
-        apply_cpu_model(NULL, errp);
+        apply_cpu_model(NULL);
         return;
     }
 
-    max_model = get_max_cpu_model(errp);
+    max_model = get_max_cpu_model();
     if (!max_model) {
-        error_prepend(errp, "CPU models are not available: ");
+        //error_prepend(errp, "CPU models are not available: ");
         return;
     }
 
@@ -963,161 +333,14 @@ void s390_realize_cpu_model(CPUState *cs, Error **errp)
     cpu->model->cpu_id_format = max_model->cpu_id_format;
     cpu->model->cpu_ver = max_model->cpu_ver;
 
-    check_consistency(cpu->model);
-    check_compatibility(max_model, cpu->model, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
-    }
+    apply_cpu_model(cpu->model);
 
-    apply_cpu_model(cpu->model, errp);
-
-#if !defined(CONFIG_USER_ONLY)
     cpu->env.cpuid = s390_cpuid_from_cpu_model(cpu->model);
-    if (tcg_enabled()) {
-        /* basic mode, write the cpu address into the first 4 bit of the ID */
-        cpu->env.cpuid = deposit64(cpu->env.cpuid, 54, 4, cpu->env.core_id);
-    }
-#endif
+    /* basic mode, write the cpu address into the first 4 bit of the ID */
+    cpu->env.cpuid = deposit64(cpu->env.cpuid, 54, 4, cpu->env.core_id);
 }
 
-static void get_feature(Object *obj, Visitor *v, const char *name,
-                        void *opaque, Error **errp)
-{
-    S390Feat feat = (S390Feat) opaque;
-    S390CPU *cpu = S390_CPU(obj);
-    bool value;
-
-    if (!cpu->model) {
-        error_setg(errp, "Details about the host CPU model are not available, "
-                         "features cannot be queried.");
-        return;
-    }
-
-    value = test_bit(feat, cpu->model->features);
-    visit_type_bool(v, name, &value, errp);
-}
-
-static void set_feature(Object *obj, Visitor *v, const char *name,
-                        void *opaque, Error **errp)
-{
-    Error *err = NULL;
-    S390Feat feat = (S390Feat) opaque;
-    DeviceState *dev = DEVICE(obj);
-    S390CPU *cpu = S390_CPU(obj);
-    bool value;
-
-    if (dev->realized) {
-        error_setg(errp, "Attempt to set property '%s' on '%s' after "
-                   "it was realized", name, object_get_typename(obj));
-        return;
-    } else if (!cpu->model) {
-        error_setg(errp, "Details about the host CPU model are not available, "
-                         "features cannot be changed.");
-        return;
-    }
-
-    visit_type_bool(v, name, &value, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
-    }
-    if (value) {
-        if (!test_bit(feat, cpu->model->def->full_feat)) {
-            error_setg(errp, "Feature '%s' is not available for CPU model '%s',"
-                       " it was introduced with later models.",
-                       name, cpu->model->def->name);
-            return;
-        }
-        set_bit(feat, cpu->model->features);
-    } else {
-        clear_bit(feat, cpu->model->features);
-    }
-}
-
-static void get_feature_group(Object *obj, Visitor *v, const char *name,
-                              void *opaque, Error **errp)
-{
-    S390FeatGroup group = (S390FeatGroup) opaque;
-    const S390FeatGroupDef *def = s390_feat_group_def(group);
-    S390CPU *cpu = S390_CPU(obj);
-    S390FeatBitmap tmp;
-    bool value;
-
-    if (!cpu->model) {
-        error_setg(errp, "Details about the host CPU model are not available, "
-                         "features cannot be queried.");
-        return;
-    }
-
-    /* a group is enabled if all features are enabled */
-    bitmap_and(tmp, cpu->model->features, def->feat, S390_FEAT_MAX);
-    value = bitmap_equal(tmp, def->feat, S390_FEAT_MAX);
-    visit_type_bool(v, name, &value, errp);
-}
-
-static void set_feature_group(Object *obj, Visitor *v, const char *name,
-                              void *opaque, Error **errp)
-{
-    Error *err = NULL;
-    S390FeatGroup group = (S390FeatGroup) opaque;
-    const S390FeatGroupDef *def = s390_feat_group_def(group);
-    DeviceState *dev = DEVICE(obj);
-    S390CPU *cpu = S390_CPU(obj);
-    bool value;
-
-    if (dev->realized) {
-        error_setg(errp, "Attempt to set property '%s' on '%s' after "
-                   "it was realized", name, object_get_typename(obj));
-        return;
-    } else if (!cpu->model) {
-        error_setg(errp, "Details about the host CPU model are not available, "
-                         "features cannot be changed.");
-        return;
-    }
-
-    visit_type_bool(v, name, &value, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
-    }
-    if (value) {
-        /* groups are added in one shot, so an intersect is sufficient */
-        if (!bitmap_intersects(def->feat, cpu->model->def->full_feat,
-                               S390_FEAT_MAX)) {
-            error_setg(errp, "Group '%s' is not available for CPU model '%s',"
-                       " it was introduced with later models.",
-                       name, cpu->model->def->name);
-            return;
-        }
-        bitmap_or(cpu->model->features, cpu->model->features, def->feat,
-                  S390_FEAT_MAX);
-    } else {
-        bitmap_andnot(cpu->model->features, cpu->model->features, def->feat,
-                      S390_FEAT_MAX);
-    }
-}
-
-void s390_cpu_model_register_props(Object *obj)
-{
-    S390FeatGroup group;
-    S390Feat feat;
-
-    for (feat = 0; feat < S390_FEAT_MAX; feat++) {
-        const S390FeatDef *def = s390_feat_def(feat);
-        object_property_add(obj, def->name, "bool", get_feature,
-                            set_feature, NULL, (void *) feat, NULL);
-        object_property_set_description(obj, def->name, def->desc , NULL);
-    }
-    for (group = 0; group < S390_FEAT_GROUP_MAX; group++) {
-        const S390FeatGroupDef *def = s390_feat_group_def(group);
-        object_property_add(obj, def->name, "bool", get_feature_group,
-                            set_feature_group, NULL, (void *) group, NULL);
-        object_property_set_description(obj, def->name, def->desc , NULL);
-    }
-}
-
-static void s390_cpu_model_initfn(Object *obj)
+static void s390_cpu_model_initfn(CPUState *obj)
 {
     S390CPU *cpu = S390_CPU(obj);
     S390CPUClass *xcc = S390_CPU_GET_CLASS(cpu);
@@ -1148,7 +371,7 @@ void s390_set_qemu_cpu_model(uint16_t type, uint8_t gen, uint8_t ec_ga,
     const S390CPUDef *def = s390_find_cpu_def(type, gen, ec_ga, NULL);
 
     g_assert(def);
-    g_assert(QTAILQ_EMPTY_RCU(&cpus));
+    //g_assert(QTAILQ_EMPTY_RCU(&cpus));
 
     /* TCG emulates some features that can usually not be enabled with
      * the emulated machine generation. Make sure they can be enabled
@@ -1165,7 +388,7 @@ void s390_set_qemu_cpu_model(uint16_t type, uint8_t gen, uint8_t ec_ga,
     s390_init_feat_bitmap(feat_init, s390_qemu_cpu_model.features);
 }
 
-static void s390_qemu_cpu_model_initfn(Object *obj)
+static void s390_qemu_cpu_model_initfn(CPUState *obj)
 {
     S390CPU *cpu = S390_CPU(obj);
 
@@ -1174,107 +397,58 @@ static void s390_qemu_cpu_model_initfn(Object *obj)
     memcpy(cpu->model, &s390_qemu_cpu_model, sizeof(*cpu->model));
 }
 
-static void s390_max_cpu_model_initfn(Object *obj)
+static void s390_max_cpu_model_initfn(CPUState *obj)
 {
     const S390CPUModel *max_model;
     S390CPU *cpu = S390_CPU(obj);
-    Error *local_err = NULL;
 
-    if (kvm_enabled() && !kvm_s390_cpu_models_supported()) {
-        /* "max" and "host" always work, even without CPU model support */
-        return;
-    }
-
-    max_model = get_max_cpu_model(&local_err);
-    if (local_err) {
-        /* we expect errors only under KVM, when actually querying the kernel */
-        g_assert(kvm_enabled());
-        error_report_err(local_err);
-        /* fallback to unsupported CPU models */
-        return;
-    }
+    max_model = get_max_cpu_model();
 
     cpu->model = g_new(S390CPUModel, 1);
     /* copy the CPU model so we can modify it */
     memcpy(cpu->model, max_model, sizeof(*cpu->model));
 }
 
-static void s390_cpu_model_finalize(Object *obj)
+void s390_cpu_model_finalize(CPUState *obj)
 {
     S390CPU *cpu = S390_CPU(obj);
 
     g_free(cpu->model);
+    g_free(cpu->ss.keydata);
     cpu->model = NULL;
 }
 
-static bool get_is_migration_safe(Object *obj, Error **errp)
-{
-    return S390_CPU_GET_CLASS(obj)->is_migration_safe;
-}
-
-static bool get_is_static(Object *obj, Error **errp)
-{
-    return S390_CPU_GET_CLASS(obj)->is_static;
-}
-
-static char *get_description(Object *obj, Error **errp)
-{
-    return g_strdup(S390_CPU_GET_CLASS(obj)->desc);
-}
-
-void s390_cpu_model_class_register_props(ObjectClass *oc)
-{
-    object_class_property_add_bool(oc, "migration-safe", get_is_migration_safe,
-                                   NULL, NULL);
-    object_class_property_add_bool(oc, "static", get_is_static,
-                                   NULL, NULL);
-    object_class_property_add_str(oc, "description", get_description, NULL,
-                                  NULL);
-}
-
-#ifdef CONFIG_KVM
-static void s390_host_cpu_model_class_init(ObjectClass *oc, void *data)
-{
-    S390CPUClass *xcc = S390_CPU_CLASS(oc);
-
-    xcc->kvm_required = true;
-    xcc->desc = "KVM only: All recognized features";
-}
-#endif
-
-static void s390_base_cpu_model_class_init(ObjectClass *oc, void *data)
+static void s390_base_cpu_model_class_init(struct uc_struct *uc, CPUClass *oc, void *data)
 {
     S390CPUClass *xcc = S390_CPU_CLASS(oc);
 
     /* all base models are migration safe */
     xcc->cpu_def = (const S390CPUDef *) data;
-    xcc->is_migration_safe = true;
     xcc->is_static = true;
-    xcc->desc = xcc->cpu_def->desc;
+    // xcc->desc = xcc->cpu_def->desc;
 }
 
-static void s390_cpu_model_class_init(ObjectClass *oc, void *data)
+static void s390_cpu_model_class_init(struct uc_struct *uc, CPUClass *oc, void *data)
 {
     S390CPUClass *xcc = S390_CPU_CLASS(oc);
 
     /* model that can change between QEMU versions */
     xcc->cpu_def = (const S390CPUDef *) data;
-    xcc->is_migration_safe = true;
-    xcc->desc = xcc->cpu_def->desc;
+    // xcc->is_migration_safe = true;
+    // xcc->desc = xcc->cpu_def->desc;
 }
 
-static void s390_qemu_cpu_model_class_init(ObjectClass *oc, void *data)
+static void s390_qemu_cpu_model_class_init(struct uc_struct *uc, CPUClass *oc, void *data)
 {
-    S390CPUClass *xcc = S390_CPU_CLASS(oc);
+    //S390CPUClass *xcc = S390_CPU_CLASS(oc);
 
-    xcc->is_migration_safe = true;
-    xcc->desc = g_strdup_printf("QEMU Virtual CPU version %s",
-                                qemu_hw_version());
+    //xcc->desc = g_strdup_printf("QEMU Virtual CPU version %s",
+    //                            qemu_hw_version());
 }
 
-static void s390_max_cpu_model_class_init(ObjectClass *oc, void *data)
+static void s390_max_cpu_model_class_init(struct uc_struct *uc, CPUClass *oc, void *data)
 {
-    S390CPUClass *xcc = S390_CPU_CLASS(oc);
+    //S390CPUClass *xcc = S390_CPU_CLASS(oc);
 
     /*
      * The "max" model is neither static nor migration safe. Under KVM
@@ -1282,55 +456,9 @@ static void s390_max_cpu_model_class_init(ObjectClass *oc, void *data)
      * "qemu" CPU model without compat handling and maybe with some additional
      * CPU features that are not yet unlocked in the "qemu" model.
      */
-    xcc->desc =
-        "Enables all features supported by the accelerator in the current host";
+    //xcc->desc =
+    //    "Enables all features supported by the accelerator in the current host";
 }
-
-/* Generate type name for a cpu model. Caller has to free the string. */
-static char *s390_cpu_type_name(const char *model_name)
-{
-    return g_strdup_printf(S390_CPU_TYPE_NAME("%s"), model_name);
-}
-
-/* Generate type name for a base cpu model. Caller has to free the string. */
-static char *s390_base_cpu_type_name(const char *model_name)
-{
-    return g_strdup_printf(S390_CPU_TYPE_NAME("%s-base"), model_name);
-}
-
-ObjectClass *s390_cpu_class_by_name(const char *name)
-{
-    char *typename = s390_cpu_type_name(name);
-    ObjectClass *oc;
-
-    oc = object_class_by_name(typename);
-    g_free(typename);
-    return oc;
-}
-
-static const TypeInfo qemu_s390_cpu_type_info = {
-    .name = S390_CPU_TYPE_NAME("qemu"),
-    .parent = TYPE_S390_CPU,
-    .instance_init = s390_qemu_cpu_model_initfn,
-    .instance_finalize = s390_cpu_model_finalize,
-    .class_init = s390_qemu_cpu_model_class_init,
-};
-
-static const TypeInfo max_s390_cpu_type_info = {
-    .name = S390_CPU_TYPE_NAME("max"),
-    .parent = TYPE_S390_CPU,
-    .instance_init = s390_max_cpu_model_initfn,
-    .instance_finalize = s390_cpu_model_finalize,
-    .class_init = s390_max_cpu_model_class_init,
-};
-
-#ifdef CONFIG_KVM
-static const TypeInfo host_s390_cpu_type_info = {
-    .name = S390_CPU_TYPE_NAME("host"),
-    .parent = S390_CPU_TYPE_NAME("max"),
-    .class_init = s390_host_cpu_model_class_init,
-};
-#endif
 
 static void init_ignored_base_feat(void)
 {
@@ -1357,7 +485,7 @@ static void init_ignored_base_feat(void)
     }
 }
 
-static void register_types(void)
+void s390_init_cpu_model(uc_engine *uc, uc_cpu_s390x cpu_model)
 {
     static const S390FeatInit qemu_latest_init = { S390_FEAT_LIST_QEMU_LATEST };
     int i;
@@ -1379,37 +507,16 @@ static void register_types(void)
     s390_set_qemu_cpu_model(QEMU_MAX_CPU_TYPE, QEMU_MAX_CPU_GEN,
                             QEMU_MAX_CPU_EC_GA, qemu_latest_init);
 
-    for (i = 0; i < ARRAY_SIZE(s390_cpu_defs); i++) {
-        char *base_name = s390_base_cpu_type_name(s390_cpu_defs[i].name);
-        TypeInfo ti_base = {
-            .name = base_name,
-            .parent = TYPE_S390_CPU,
-            .instance_init = s390_cpu_model_initfn,
-            .instance_finalize = s390_cpu_model_finalize,
-            .class_init = s390_base_cpu_model_class_init,
-            .class_data = (void *) &s390_cpu_defs[i],
-        };
-        char *name = s390_cpu_type_name(s390_cpu_defs[i].name);
-        TypeInfo ti = {
-            .name = name,
-            .parent = TYPE_S390_CPU,
-            .instance_init = s390_cpu_model_initfn,
-            .instance_finalize = s390_cpu_model_finalize,
-            .class_init = s390_cpu_model_class_init,
-            .class_data = (void *) &s390_cpu_defs[i],
-        };
-
-        type_register_static(&ti_base);
-        type_register_static(&ti);
-        g_free(base_name);
-        g_free(name);
+    if (cpu_model < ARRAY_SIZE(s390_cpu_defs)) {
+        s390_base_cpu_model_class_init(uc, uc->cpu->cc, (void *) &s390_cpu_defs[cpu_model]);
+        s390_cpu_model_class_init(uc, uc->cpu->cc, (void *) &s390_cpu_defs[cpu_model]);
+        s390_cpu_model_initfn(uc->cpu);
+    } else if (cpu_model == UC_CPU_S390X_MAX) {
+        s390_max_cpu_model_class_init(uc, uc->cpu->cc, NULL);
+        s390_max_cpu_model_initfn(uc->cpu);
+    } else if (cpu_model == UC_CPU_S390X_QEMU) {
+        s390_qemu_cpu_model_class_init(uc, uc->cpu->cc, NULL);
+        s390_qemu_cpu_model_initfn(uc->cpu);
     }
 
-    type_register_static(&qemu_s390_cpu_type_info);
-    type_register_static(&max_s390_cpu_type_info);
-#ifdef CONFIG_KVM
-    type_register_static(&host_s390_cpu_type_info);
-#endif
 }
-
-type_init(register_types)

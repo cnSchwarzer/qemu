@@ -60,12 +60,18 @@ GList *range_list_insert(GList *list, Range *data)
 
     /* Merge any subsequent list elements that now also overlap */
     while (l->next && range_compare(l->data, l->next->data) == 0) {
+#ifndef NDEBUG
         GList *new_l;
+#endif
 
         range_extend(l->data, l->next->data);
         g_free(l->next->data);
+#ifndef NDEBUG
         new_l = g_list_delete_link(list, l->next);
         assert(new_l == list);
+#else
+        g_list_delete_link(list, l->next);
+#endif
     }
 
     return list;

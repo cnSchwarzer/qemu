@@ -21,17 +21,11 @@
 #include "qemu/units.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
-#include "sysemu/kvm.h"
-#include "kvm_ppc.h"
 #include "mmu-hash64.h"
 #include "mmu-hash32.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
-#include "exec/log.h"
 #include "helper_regs.h"
-#include "qemu/error-report.h"
-#include "qemu/main-loop.h"
-#include "qemu/qemu-print.h"
 #include "mmu-book3s-v3.h"
 #include "mmu-radix64.h"
 
@@ -170,7 +164,11 @@ static inline int ppc6xx_tlb_pte_check(mmu_ctx_t *ctx, target_ulong pte0,
         mmask = PTE_CHECK_MASK;
         pp = pte1 & 0x00000003;
         if (ptem == ctx->ptem) {
+#ifdef _MSC_VER
+            if (ctx->raddr != (hwaddr)(0ULL - 1ULL)) {
+#else
             if (ctx->raddr != (hwaddr)-1ULL) {
+#endif
                 /* all matches should have equal RPN, WIMG & PP */
                 if ((ctx->raddr & mmask) != (pte1 & mmask)) {
                     qemu_log_mask(CPU_LOG_MMU, "Bad RPN/WIMG/PP\n");
@@ -475,7 +473,9 @@ static int get_bat_6xx_tlb(CPUPPCState *env, mmu_ctx_t *ctx,
 static inline int get_segment_6xx_tlb(CPUPPCState *env, mmu_ctx_t *ctx,
                                       target_ulong eaddr, int rw, int type)
 {
+#if 0
     PowerPCCPU *cpu = env_archcpu(env);
+#endif
     hwaddr hash;
     target_ulong vsid;
     int ds, pr, target_page_bits;
@@ -492,33 +492,43 @@ static inline int get_segment_6xx_tlb(CPUPPCState *env, mmu_ctx_t *ctx,
     ctx->nx = sr & 0x10000000 ? 1 : 0;
     vsid = sr & 0x00FFFFFF;
     target_page_bits = TARGET_PAGE_BITS;
+#if 0
     qemu_log_mask(CPU_LOG_MMU,
             "Check segment v=" TARGET_FMT_lx " %d " TARGET_FMT_lx
             " nip=" TARGET_FMT_lx " lr=" TARGET_FMT_lx
             " ir=%d dr=%d pr=%d %d t=%d\n",
             eaddr, (int)(eaddr >> 28), sr, env->nip, env->lr, (int)msr_ir,
             (int)msr_dr, pr != 0 ? 1 : 0, rw, type);
+#endif
     pgidx = (eaddr & ~SEGMENT_MASK_256M) >> target_page_bits;
     hash = vsid ^ pgidx;
     ctx->ptem = (vsid << 7) | (pgidx >> 10);
 
+#if 0
     qemu_log_mask(CPU_LOG_MMU,
             "pte segment: key=%d ds %d nx %d vsid " TARGET_FMT_lx "\n",
             ctx->key, ds, ctx->nx, vsid);
+#endif
     ret = -1;
     if (!ds) {
         /* Check if instruction fetch is allowed, if needed */
         if (type != ACCESS_CODE || ctx->nx == 0) {
             /* Page address translation */
+#if 0
             qemu_log_mask(CPU_LOG_MMU, "htab_base " TARGET_FMT_plx
                     " htab_mask " TARGET_FMT_plx
                     " hash " TARGET_FMT_plx "\n",
                     ppc_hash32_hpt_base(cpu), ppc_hash32_hpt_mask(cpu), hash);
+#endif
             ctx->hash[0] = hash;
             ctx->hash[1] = ~hash;
 
             /* Initialize real address with an invalid value */
+#ifdef _MSC_VER
+            ctx->raddr = (hwaddr)(0ULL - 1ULL);
+#else
             ctx->raddr = (hwaddr)-1ULL;
+#endif
             /* Software TLB search */
             ret = ppc6xx_tlb_check(env, ctx, eaddr, rw, type);
 #if defined(DUMP_PAGE_TABLES)
@@ -527,9 +537,11 @@ static inline int get_segment_6xx_tlb(CPUPPCState *env, mmu_ctx_t *ctx,
                 hwaddr curaddr;
                 uint32_t a0, a1, a2, a3;
 
+#if 0
                 qemu_log("Page table: " TARGET_FMT_plx " len " TARGET_FMT_plx
                          "\n", ppc_hash32_hpt_base(cpu),
                          ppc_hash32_hpt_mask(env) + 0x80);
+#endif
                 for (curaddr = ppc_hash32_hpt_base(cpu);
                      curaddr < (ppc_hash32_hpt_base(cpu)
                                 + ppc_hash32_hpt_mask(cpu) + 0x80);
@@ -546,13 +558,17 @@ static inline int get_segment_6xx_tlb(CPUPPCState *env, mmu_ctx_t *ctx,
             }
 #endif
         } else {
+#if 0
             qemu_log_mask(CPU_LOG_MMU, "No access allowed\n");
+#endif
             ret = -3;
         }
     } else {
         target_ulong sr;
 
+#if 0
         qemu_log_mask(CPU_LOG_MMU, "direct store...\n");
+#endif
         /* Direct-store segment : absolutely *BUGGY* for now */
 
         /*
@@ -599,8 +615,10 @@ static inline int get_segment_6xx_tlb(CPUPPCState *env, mmu_ctx_t *ctx,
             /* eciwx or ecowx */
             return -4;
         default:
+#if 0
             qemu_log_mask(CPU_LOG_MMU, "ERROR: instruction should not need "
                           "address translation\n");
+#endif
             return -4;
         }
         if ((rw == 1 || ctx->key != 1) && (rw == 0 || ctx->key != 0)) {
@@ -690,7 +708,11 @@ static int mmu40x_get_physical_address(CPUPPCState *env, mmu_ctx_t *ctx,
     int i, ret, zsel, zpr, pr;
 
     ret = -1;
+#ifdef _MSC_VER
+    raddr = (hwaddr)(0ULL - 1ULL);
+#else
     raddr = (hwaddr)-1ULL;
+#endif
     pr = msr_pr;
     for (i = 0; i < env->nb_tlb; i++) {
         tlb = &env->tlb.tlbe[i];
@@ -836,7 +858,11 @@ static int mmubooke_get_physical_address(CPUPPCState *env, mmu_ctx_t *ctx,
     int i, ret;
 
     ret = -1;
+#ifdef _MSC_VER
+    raddr = (hwaddr)(0ULL - 1ULL);
+#else
     raddr = (hwaddr)-1ULL;
+#endif
     for (i = 0; i < env->nb_tlb; i++) {
         tlb = &env->tlb.tlbe[i];
         ret = mmubooke_check_tlb(env, tlb, &raddr, &ctx->prot, address, rw,
@@ -1087,7 +1113,11 @@ static int mmubooke206_get_physical_address(CPUPPCState *env, mmu_ctx_t *ctx,
     int i, j, ret;
 
     ret = -1;
+#ifdef _MSC_VER
+    raddr = (hwaddr)(0ULL - 1ULL);
+#else
     raddr = (hwaddr)-1ULL;
+#endif
 
     for (i = 0; i < BOOKE206_MAX_TLBN; i++) {
         int ways = booke206_tlb_ways(env, i);
@@ -1109,17 +1139,22 @@ found_tlb:
 
     if (ret >= 0) {
         ctx->raddr = raddr;
+#if 0
         LOG_SWTLB("%s: access granted " TARGET_FMT_lx " => " TARGET_FMT_plx
                   " %d %d\n", __func__, address, ctx->raddr, ctx->prot,
                   ret);
+#endif
     } else {
+#if 0
         LOG_SWTLB("%s: access refused " TARGET_FMT_lx " => " TARGET_FMT_plx
                   " %d %d\n", __func__, address, raddr, ctx->prot, ret);
+#endif
     }
 
     return ret;
 }
 
+#if 0
 static const char *book3e_tsize_to_str[32] = {
     "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K",
     "1M", "2M", "4M", "8M", "16M", "32M", "64M", "128M", "256M", "512M",
@@ -1167,7 +1202,6 @@ static void mmubooke_dump_mmu(CPUPPCState *env)
                     (uint64_t)ea, (uint64_t)pa, size_buf, (uint32_t)entry->PID,
                     entry->prot, entry->attr);
     }
-
 }
 
 static void mmubooke206_dump_one_tlb(CPUPPCState *env, int tlbn, int offset,
@@ -1223,10 +1257,12 @@ static void mmubooke206_dump_mmu(CPUPPCState *env)
     int offset = 0;
     int i;
 
+#if 0
     if (kvm_enabled() && !env->kvm_sw_tlb) {
         qemu_printf("Cannot access KVM TLB\n");
         return;
     }
+#endif
 
     for (i = 0; i < BOOKE206_MAX_TLBN; i++) {
         int size = booke206_tlb_size(env, i);
@@ -1326,9 +1362,11 @@ static void mmu6xx_dump_mmu(CPUPPCState *env)
         }
     }
 }
+#endif
 
 void dump_mmu(CPUPPCState *env)
 {
+#if 0
     switch (env->mmu_model) {
     case POWERPC_MMU_BOOKE:
         mmubooke_dump_mmu(env);
@@ -1358,6 +1396,7 @@ void dump_mmu(CPUPPCState *env)
     default:
         qemu_log_mask(LOG_UNIMP, "%s: unimplemented\n", __func__);
     }
+#endif
 }
 
 static inline int check_physical(CPUPPCState *env, mmu_ctx_t *ctx,
@@ -1465,8 +1504,9 @@ static int get_physical_address_wtlb(
         } else {
             cpu_abort(env_cpu(env),
                       "PowerPC in real mode do not do any translation\n");
+            return -1;
         }
-        return -1;
+        break;
     default:
         cpu_abort(env_cpu(env), "Unknown or invalid MMU model\n");
         return -1;
@@ -2086,22 +2126,28 @@ void ppc_tlb_invalidate_one(CPUPPCState *env, target_ulong addr)
 /* Special registers manipulation */
 void ppc_store_sdr1(CPUPPCState *env, target_ulong value)
 {
+#if 0
     PowerPCCPU *cpu = env_archcpu(env);
     qemu_log_mask(CPU_LOG_MMU, "%s: " TARGET_FMT_lx "\n", __func__, value);
     assert(!cpu->vhyp);
+#endif
 #if defined(TARGET_PPC64)
     if (env->mmu_model & POWERPC_MMU_64) {
         target_ulong sdr_mask = SDR_64_HTABORG | SDR_64_HTABSIZE;
         target_ulong htabsize = value & SDR_64_HTABSIZE;
 
         if (value & ~sdr_mask) {
+#if 0
             error_report("Invalid bits 0x"TARGET_FMT_lx" set in SDR1",
                          value & ~sdr_mask);
+#endif
             value &= sdr_mask;
         }
         if (htabsize > 28) {
+#if 0
             error_report("Invalid HTABSIZE 0x" TARGET_FMT_lx" stored in SDR1",
                          htabsize);
+#endif
             return;
         }
     }
@@ -2113,24 +2159,32 @@ void ppc_store_sdr1(CPUPPCState *env, target_ulong value)
 #if defined(TARGET_PPC64)
 void ppc_store_ptcr(CPUPPCState *env, target_ulong value)
 {
+#if 0
     PowerPCCPU *cpu = env_archcpu(env);
+#endif
     target_ulong ptcr_mask = PTCR_PATB | PTCR_PATS;
     target_ulong patbsize = value & PTCR_PATS;
 
+#if 0
     qemu_log_mask(CPU_LOG_MMU, "%s: " TARGET_FMT_lx "\n", __func__, value);
 
     assert(!cpu->vhyp);
+#endif
     assert(env->mmu_model & POWERPC_MMU_3_00);
 
     if (value & ~ptcr_mask) {
+#if 0
         error_report("Invalid bits 0x"TARGET_FMT_lx" set in PTCR",
                      value & ~ptcr_mask);
+#endif
         value &= ptcr_mask;
     }
 
     if (patbsize > 24) {
+#if 0
         error_report("Invalid Partition Table size 0x" TARGET_FMT_lx
                      " stored in PTCR", patbsize);
+#endif
         return;
     }
 
@@ -2153,9 +2207,11 @@ target_ulong helper_load_sr(CPUPPCState *env, target_ulong sr_num)
 
 void helper_store_sr(CPUPPCState *env, target_ulong srnum, target_ulong value)
 {
+#if 0
     qemu_log_mask(CPU_LOG_MMU,
             "%s: reg=%d " TARGET_FMT_lx " " TARGET_FMT_lx "\n", __func__,
             (int)srnum, value, env->sr[srnum]);
+#endif
 #if defined(TARGET_PPC64)
     if (env->mmu_model & POWERPC_MMU_64) {
         PowerPCCPU *cpu = env_archcpu(env);
@@ -2230,9 +2286,11 @@ static void do_6xx_tlb(CPUPPCState *env, target_ulong new_EPN, int is_code)
     }
     way = (env->spr[SPR_SRR1] >> 17) & 1;
     (void)EPN; /* avoid a compiler warning */
+#if 0
     LOG_SWTLB("%s: EPN " TARGET_FMT_lx " " TARGET_FMT_lx " PTE0 " TARGET_FMT_lx
               " PTE1 " TARGET_FMT_lx " way %d\n", __func__, new_EPN, EPN, CMP,
               RPN, way);
+#endif
     /* Store this TLB */
     ppc6xx_tlb_store(env, (uint32_t)(new_EPN & TARGET_PAGE_MASK),
                      way, is_code, CMP, RPN);
@@ -2914,7 +2972,7 @@ static inline void booke206_invalidate_ea_tlb(CPUPPCState *env, int tlbn,
 
 void helper_booke206_tlbivax(CPUPPCState *env, target_ulong address)
 {
-    CPUState *cs;
+    CPUState *cs = env_cpu(env);
 
     if (address & 0x4) {
         /* flush all entries */
@@ -2931,15 +2989,11 @@ void helper_booke206_tlbivax(CPUPPCState *env, target_ulong address)
     if (address & 0x8) {
         /* flush TLB1 entries */
         booke206_invalidate_ea_tlb(env, 1, address);
-        CPU_FOREACH(cs) {
-            tlb_flush(cs);
-        }
+        tlb_flush(cs);
     } else {
         /* flush TLB0 entries */
         booke206_invalidate_ea_tlb(env, 0, address);
-        CPU_FOREACH(cs) {
-            tlb_flush_page(cs, address & MAS2_EPN_MASK);
-        }
+        tlb_flush_page(cs, address & MAS2_EPN_MASK);
     }
 }
 

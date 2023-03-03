@@ -30,13 +30,10 @@ typedef struct TranslationBlock TranslationBlock;
 typedef struct TBContext TBContext;
 
 struct TBContext {
-
     struct qht htable;
 
     /* statistics */
     unsigned tb_flush_count;
 };
-
-extern TBContext tb_ctx;
 
 #endif

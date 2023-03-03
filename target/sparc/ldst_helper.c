@@ -69,7 +69,7 @@
 #define QT0 (env->qt0)
 #define QT1 (env->qt1)
 
-#if defined(TARGET_SPARC64) && !defined(CONFIG_USER_ONLY)
+#if defined(TARGET_SPARC64)
 /* Calculates TSB pointer value for fault page size
  * UltraSPARC IIi has fixed sizes (8k or 64k) for the page pointers
  * UA2005 holds the page size configuration in mmu_ctx registers */
@@ -311,19 +311,24 @@ static inline int is_translating_asi(int asi)
     /* Ultrasparc IIi translating asi
        - note this list is defined by cpu implementation
     */
-    switch (asi) {
-    case 0x04 ... 0x11:
-    case 0x16 ... 0x19:
-    case 0x1E ... 0x1F:
-    case 0x24 ... 0x2C:
-    case 0x70 ... 0x73:
-    case 0x78 ... 0x79:
-    case 0x80 ... 0xFF:
+#define XRANGE(x, a, b) (x >=a && x <= b)
+    if (XRANGE(asi, 0x04, 0x11))
         return 1;
+    if (XRANGE(asi, 0x16, 0x19))
+        return 1;
+    if (XRANGE(asi, 0x1E, 0x1F))
+        return 1;
+    if (XRANGE(asi, 0x24, 0x2C))
+        return 1;
+    if (XRANGE(asi, 0x70, 0x73))
+        return 1;
+    if (XRANGE(asi, 0x78, 0x79))
+        return 1;
+    if (XRANGE(asi, 0x80, 0xFF))
+        return 1;
+#undef XRANGE
 
-    default:
-        return 0;
-    }
+    return 0;
 }
 
 static inline target_ulong address_mask(CPUSPARCState *env1, target_ulong addr)
@@ -343,7 +348,6 @@ static inline target_ulong asi_address_mask(CPUSPARCState *env,
     return addr;
 }
 
-#ifndef CONFIG_USER_ONLY
 static inline void do_check_asi(CPUSPARCState *env, int asi, uintptr_t ra)
 {
     /* ASIs >= 0x80 are user mode.
@@ -357,7 +361,6 @@ static inline void do_check_asi(CPUSPARCState *env, int asi, uintptr_t ra)
         cpu_raise_exception_ra(env, TT_PRIV_ACT, ra);
     }
 }
-#endif /* !CONFIG_USER_ONLY */
 #endif
 
 static void do_check_align(CPUSPARCState *env, target_ulong addr,
@@ -377,8 +380,7 @@ void helper_check_align(CPUSPARCState *env, target_ulong addr, uint32_t align)
     do_check_align(env, addr, align, GETPC());
 }
 
-#if !defined(TARGET_SPARC64) && !defined(CONFIG_USER_ONLY) &&   \
-    defined(DEBUG_MXCC)
+#if !defined(TARGET_SPARC64) && defined(DEBUG_MXCC)
 static void dump_mxcc(CPUSPARCState *env)
 {
     printf("mxccdata: %016" PRIx64 " %016" PRIx64 " %016" PRIx64 " %016" PRIx64
@@ -396,8 +398,7 @@ static void dump_mxcc(CPUSPARCState *env)
 }
 #endif
 
-#if (defined(TARGET_SPARC64) || !defined(CONFIG_USER_ONLY))     \
-    && defined(DEBUG_ASI)
+#if defined(TARGET_SPARC64) && defined(DEBUG_ASI)
 static void dump_asi(const char *txt, target_ulong addr, int asi, int size,
                      uint64_t r1)
 {
@@ -422,7 +423,6 @@ static void dump_asi(const char *txt, target_ulong addr, int asi, int size,
 }
 #endif
 
-#ifndef CONFIG_USER_ONLY
 #ifndef TARGET_SPARC64
 static void sparc_raise_mmu_fault(CPUState *cs, hwaddr addr,
                                   bool is_write, bool is_exec, int is_asi,
@@ -513,11 +513,8 @@ static void sparc_raise_mmu_fault(CPUState *cs, hwaddr addr,
     }
 }
 #endif
-#endif
 
 #ifndef TARGET_SPARC64
-#ifndef CONFIG_USER_ONLY
-
 
 /* Leon3 cache control */
 
@@ -717,27 +714,41 @@ uint64_t helper_ld_asi(CPUSPARCState *env, target_ulong addr,
     case ASI_M_DATAC_TAG:  /* SparcStation 5 D-cache tag */
     case ASI_M_DATAC_DATA: /* SparcStation 5 D-cache data */
         break;
-    case 0x21 ... 0x2f: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x21: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x22: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x23: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x24: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x25: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x26: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x27: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x28: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x29: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2a: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2b: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2c: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2d: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2e: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2f: /* MMU passthrough, 0x100000000 to 0xfffffffff */
     {
         MemTxResult result;
         hwaddr access_addr = (hwaddr)addr | ((hwaddr)(asi & 0xf) << 32);
 
         switch (size) {
         case 1:
-            ret = address_space_ldub(cs->as, access_addr,
+            ret = glue(address_space_ldub, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr,
                                      MEMTXATTRS_UNSPECIFIED, &result);
             break;
         case 2:
-            ret = address_space_lduw(cs->as, access_addr,
+            ret = glue(address_space_lduw, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr,
                                      MEMTXATTRS_UNSPECIFIED, &result);
             break;
         default:
         case 4:
-            ret = address_space_ldl(cs->as, access_addr,
+            ret = glue(address_space_ldl, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr,
                                     MEMTXATTRS_UNSPECIFIED, &result);
             break;
         case 8:
-            ret = address_space_ldq(cs->as, access_addr,
+            ret = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr,
                                     MEMTXATTRS_UNSPECIFIED, &result);
             break;
         }
@@ -895,7 +906,7 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, uint64_t val,
                 MemTxResult result;
                 hwaddr access_addr = (env->mxccregs[0] & 0xffffffffULL) + 8 * i;
 
-                env->mxccdata[i] = address_space_ldq(cs->as,
+                env->mxccdata[i] = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as,
                                                      access_addr,
                                                      MEMTXATTRS_UNSPECIFIED,
                                                      &result);
@@ -923,7 +934,7 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, uint64_t val,
                 MemTxResult result;
                 hwaddr access_addr = (env->mxccregs[1] & 0xffffffffULL) + 8 * i;
 
-                address_space_stq(cs->as, access_addr, env->mxccdata[i],
+                glue(address_space_stq, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr, env->mxccdata[i],
                                   MEMTXATTRS_UNSPECIFIED, &result);
 
                 if (result != MEMTX_OK) {
@@ -1078,27 +1089,41 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, uint64_t val,
     case ASI_M_FLUSH_CTX:    /* I/D-cache flush context */
     case ASI_M_FLUSH_USER:   /* I/D-cache flush user */
         break;
-    case 0x21 ... 0x2f: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x21: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x22: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x23: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x24: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x25: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x26: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x27: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x28: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x29: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2a: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2b: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2c: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2d: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2e: /* MMU passthrough, 0x100000000 to 0xfffffffff */
+    case 0x2f: /* MMU passthrough, 0x100000000 to 0xfffffffff */
         {
             MemTxResult result;
             hwaddr access_addr = (hwaddr)addr | ((hwaddr)(asi & 0xf) << 32);
 
             switch (size) {
             case 1:
-                address_space_stb(cs->as, access_addr, val,
+                glue(address_space_stb, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr, val,
                                   MEMTXATTRS_UNSPECIFIED, &result);
                 break;
             case 2:
-                address_space_stw(cs->as, access_addr, val,
+                glue(address_space_stw, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr, val,
                                   MEMTXATTRS_UNSPECIFIED, &result);
                 break;
             case 4:
             default:
-                address_space_stl(cs->as, access_addr, val,
+                glue(address_space_stl, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr, val,
                                   MEMTXATTRS_UNSPECIFIED, &result);
                 break;
             case 8:
-                address_space_stq(cs->as, access_addr, val,
+                glue(address_space_stq, UNICORN_ARCH_POSTFIX)(cs->as->uc, cs->as, access_addr, val,
                                   MEMTXATTRS_UNSPECIFIED, &result);
                 break;
             }
@@ -1171,129 +1196,7 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, uint64_t val,
 #endif
 }
 
-#endif /* CONFIG_USER_ONLY */
 #else /* TARGET_SPARC64 */
-
-#ifdef CONFIG_USER_ONLY
-uint64_t helper_ld_asi(CPUSPARCState *env, target_ulong addr,
-                       int asi, uint32_t memop)
-{
-    int size = 1 << (memop & MO_SIZE);
-    int sign = memop & MO_SIGN;
-    uint64_t ret = 0;
-
-    if (asi < 0x80) {
-        cpu_raise_exception_ra(env, TT_PRIV_ACT, GETPC());
-    }
-    do_check_align(env, addr, size - 1, GETPC());
-    addr = asi_address_mask(env, asi, addr);
-
-    switch (asi) {
-    case ASI_PNF:  /* Primary no-fault */
-    case ASI_PNFL: /* Primary no-fault LE */
-    case ASI_SNF:  /* Secondary no-fault */
-    case ASI_SNFL: /* Secondary no-fault LE */
-        if (page_check_range(addr, size, PAGE_READ) == -1) {
-            ret = 0;
-            break;
-        }
-        switch (size) {
-        case 1:
-            ret = cpu_ldub_data(env, addr);
-            break;
-        case 2:
-            ret = cpu_lduw_data(env, addr);
-            break;
-        case 4:
-            ret = cpu_ldl_data(env, addr);
-            break;
-        case 8:
-            ret = cpu_ldq_data(env, addr);
-            break;
-        default:
-            g_assert_not_reached();
-        }
-        break;
-        break;
-
-    case ASI_P: /* Primary */
-    case ASI_PL: /* Primary LE */
-    case ASI_S:  /* Secondary */
-    case ASI_SL: /* Secondary LE */
-        /* These are always handled inline.  */
-        g_assert_not_reached();
-
-    default:
-        cpu_raise_exception_ra(env, TT_DATA_ACCESS, GETPC());
-    }
-
-    /* Convert from little endian */
-    switch (asi) {
-    case ASI_PNFL: /* Primary no-fault LE */
-    case ASI_SNFL: /* Secondary no-fault LE */
-        switch (size) {
-        case 2:
-            ret = bswap16(ret);
-            break;
-        case 4:
-            ret = bswap32(ret);
-            break;
-        case 8:
-            ret = bswap64(ret);
-            break;
-        }
-    }
-
-    /* Convert to signed number */
-    if (sign) {
-        switch (size) {
-        case 1:
-            ret = (int8_t) ret;
-            break;
-        case 2:
-            ret = (int16_t) ret;
-            break;
-        case 4:
-            ret = (int32_t) ret;
-            break;
-        }
-    }
-#ifdef DEBUG_ASI
-    dump_asi("read", addr, asi, size, ret);
-#endif
-    return ret;
-}
-
-void helper_st_asi(CPUSPARCState *env, target_ulong addr, target_ulong val,
-                   int asi, uint32_t memop)
-{
-    int size = 1 << (memop & MO_SIZE);
-#ifdef DEBUG_ASI
-    dump_asi("write", addr, asi, size, val);
-#endif
-    if (asi < 0x80) {
-        cpu_raise_exception_ra(env, TT_PRIV_ACT, GETPC());
-    }
-    do_check_align(env, addr, size - 1, GETPC());
-
-    switch (asi) {
-    case ASI_P:  /* Primary */
-    case ASI_PL: /* Primary LE */
-    case ASI_S:  /* Secondary */
-    case ASI_SL: /* Secondary LE */
-        /* These are always handled inline.  */
-        g_assert_not_reached();
-
-    case ASI_PNF:  /* Primary no-fault, RO */
-    case ASI_SNF:  /* Secondary no-fault, RO */
-    case ASI_PNFL: /* Primary no-fault LE, RO */
-    case ASI_SNFL: /* Secondary no-fault LE, RO */
-    default:
-        cpu_raise_exception_ra(env, TT_DATA_ACCESS, GETPC());
-    }
-}
-
-#else /* CONFIG_USER_ONLY */
 
 uint64_t helper_ld_asi(CPUSPARCState *env, target_ulong addr,
                        int asi, uint32_t memop)
@@ -1323,7 +1226,11 @@ uint64_t helper_ld_asi(CPUSPARCState *env, target_ulong addr,
                        ? (asi & 1 ? MMU_KERNEL_SECONDARY_IDX : MMU_KERNEL_IDX)
                        : (asi & 1 ? MMU_USER_SECONDARY_IDX : MMU_USER_IDX));
 
+#ifdef _MSC_VER
+            if (cpu_get_phys_page_nofault(env, addr, idx) == 0xffffffffffffffffULL) {
+#else
             if (cpu_get_phys_page_nofault(env, addr, idx) == -1ULL) {
+#endif
 #ifdef DEBUG_ASI
                 dump_asi("read ", last_addr, asi, size, ret);
 #endif
@@ -1939,10 +1846,7 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, target_ulong val,
         return;
     }
 }
-#endif /* CONFIG_USER_ONLY */
 #endif /* TARGET_SPARC64 */
-
-#if !defined(CONFIG_USER_ONLY)
 
 void sparc_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                      vaddr addr, unsigned size,
@@ -1957,9 +1861,7 @@ void sparc_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
     sparc_raise_mmu_fault(cs, physaddr, is_write, is_exec,
                           is_asi, size, retaddr);
 }
-#endif
 
-#if !defined(CONFIG_USER_ONLY)
 void QEMU_NORETURN sparc_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
                                                  MMUAccessType access_type,
                                                  int mmu_idx,
@@ -1974,4 +1876,3 @@ void QEMU_NORETURN sparc_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
 #endif
     cpu_raise_exception_ra(env, TT_UNALIGNED, retaddr);
 }
-#endif

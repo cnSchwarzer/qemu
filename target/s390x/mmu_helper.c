@@ -16,16 +16,12 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/error-report.h"
-#include "exec/address-spaces.h"
+//#include "exec/address-spaces.h"
 #include "cpu.h"
 #include "internal.h"
-#include "kvm_s390x.h"
-#include "sysemu/kvm.h"
 #include "sysemu/tcg.h"
 #include "exec/exec-all.h"
-#include "trace.h"
-#include "hw/hw.h"
+//#include "hw/hw.h"
 #include "hw/s390x/storage-keys.h"
 
 /* Fetch/store bits in the translation exception code: */
@@ -35,17 +31,15 @@
 static void trigger_access_exception(CPUS390XState *env, uint32_t type,
                                      uint64_t tec)
 {
-    S390CPU *cpu = env_archcpu(env);
-
-    if (kvm_enabled()) {
-        kvm_s390_access_exception(cpu, type, tec);
-    } else {
-        CPUState *cs = env_cpu(env);
-        if (type != PGM_ADDRESSING) {
-            stq_phys(cs->as, env->psa + offsetof(LowCore, trans_exc_code), tec);
-        }
-        trigger_pgm_exception(env, type);
+    CPUState *cs = env_cpu(env);
+    if (type != PGM_ADDRESSING) {
+#ifdef UNICORN_ARCH_POSTFIX
+        glue(stq_phys, UNICORN_ARCH_POSTFIX)(env->uc, cs->as, env->psa + offsetof(LowCore, trans_exc_code), tec);
+#else
+        stq_phys(env->uc, cs->as, env->psa + offsetof(LowCore, trans_exc_code), tec);
+#endif
     }
+    trigger_pgm_exception(env, type);
 }
 
 /* check whether the address would be proteted by Low-Address Protection */
@@ -74,7 +68,7 @@ static bool lowprot_enabled(const CPUS390XState *env, uint64_t asc)
         return !(env->cregs[13] & ASCE_PRIVATE_SPACE);
     default:
         /* We don't support access register mode */
-        error_report("unsupported addressing mode");
+        // error_report("unsupported addressing mode");
         exit(1);
     }
 }
@@ -119,10 +113,10 @@ static int mmu_translate_asce(CPUS390XState *env, target_ulong vaddr,
                               int *flags, int rw)
 {
     const bool edat1 = (env->cregs[0] & CR0_EDAT) &&
-                       s390_has_feat(S390_FEAT_EDAT);
-    const bool edat2 = edat1 && s390_has_feat(S390_FEAT_EDAT_2);
+                       s390_has_feat(env->uc, S390_FEAT_EDAT);
+    const bool edat2 = edat1 && s390_has_feat(env->uc, S390_FEAT_EDAT_2);
     const bool iep = (env->cregs[0] & CR0_IEP) &&
-                     s390_has_feat(S390_FEAT_INSTRUCTION_EXEC_PROT);
+                     s390_has_feat(env->uc, S390_FEAT_INSTRUCTION_EXEC_PROT);
     const int asce_tl = asce & ASCE_TABLE_LENGTH;
     const int asce_p = asce & ASCE_PRIVATE_SPACE;
     hwaddr gaddr = asce & ASCE_ORIGIN;
@@ -288,21 +282,18 @@ static int mmu_translate_asce(CPUS390XState *env, target_ulong vaddr,
     return 0;
 }
 
-static void mmu_handle_skey(target_ulong addr, int rw, int *flags)
-{
-    static S390SKeysClass *skeyclass;
-    static S390SKeysState *ss;
+static void mmu_handle_skey(uc_engine *uc, target_ulong addr, int rw, int *flags)
+{ 
+    S390SKeysState *ss = (S390SKeysState *)(&((S390CPU *)uc->cpu)->ss);
+    S390SKeysClass *skeyclass = S390_SKEYS_GET_CLASS(ss);
     uint8_t key;
     int rc;
 
+#if 0
     if (unlikely(addr >= ram_size)) {
         return;
     }
-
-    if (unlikely(!ss)) {
-        ss = s390_get_skeys_device();
-        skeyclass = S390_SKEYS_GET_CLASS(ss);
-    }
+#endif
 
     /*
      * Whenever we create a new TLB entry, we set the storage key reference
@@ -325,7 +316,7 @@ static void mmu_handle_skey(target_ulong addr, int rw, int *flags)
      */
     rc = skeyclass->get_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
     if (rc) {
-        trace_get_skeys_nonzero(rc);
+        // trace_get_skeys_nonzero(rc);
         return;
     }
 
@@ -353,7 +344,7 @@ static void mmu_handle_skey(target_ulong addr, int rw, int *flags)
 
     rc = skeyclass->set_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
     if (rc) {
-        trace_set_skeys_nonzero(rc);
+        // trace_set_skeys_nonzero(rc);
     }
 }
 
@@ -413,7 +404,7 @@ int mmu_translate(CPUS390XState *env, target_ulong vaddr, int rw, uint64_t asc,
         break;
     case PSW_ASC_ACCREG:
     default:
-        hw_error("guest switched to unknown asc mode\n");
+        // hw_error("guest switched to unknown asc mode\n");
         break;
     }
 
@@ -441,7 +432,7 @@ nodat:
     /* Convert real address -> absolute address */
     *raddr = mmu_real2abs(env, *raddr);
 
-    mmu_handle_skey(*raddr, rw, flags);
+    mmu_handle_skey(env->uc, *raddr, rw, flags);
     return 0;
 }
 
@@ -462,7 +453,7 @@ static int translate_pages(S390CPU *cpu, vaddr addr, int nr_pages,
         if (ret) {
             return ret;
         }
-        if (!address_space_access_valid(&address_space_memory, pages[i],
+        if (!address_space_access_valid(env_cpu(env)->as, pages[i],
                                         TARGET_PAGE_SIZE, is_write,
                                         MEMTXATTRS_UNSPECIFIED)) {
             *tec = 0; /* unused */
@@ -496,13 +487,7 @@ int s390_cpu_virt_mem_rw(S390CPU *cpu, vaddr laddr, uint8_t ar, void *hostbuf,
     target_ulong *pages;
     uint64_t tec;
     int ret;
-
-    if (kvm_enabled()) {
-        ret = kvm_s390_mem_op(cpu, laddr, ar, hostbuf, len, is_write);
-        if (ret >= 0) {
-            return ret;
-        }
-    }
+    CPUS390XState *env = &cpu->env;
 
     nr_pages = (((laddr & ~TARGET_PAGE_MASK) + len - 1) >> TARGET_PAGE_BITS)
                + 1;
@@ -515,10 +500,10 @@ int s390_cpu_virt_mem_rw(S390CPU *cpu, vaddr laddr, uint8_t ar, void *hostbuf,
         /* Copy data by stepping through the area page by page */
         for (i = 0; i < nr_pages; i++) {
             currlen = MIN(len, TARGET_PAGE_SIZE - (laddr % TARGET_PAGE_SIZE));
-            cpu_physical_memory_rw(pages[i] | (laddr & ~TARGET_PAGE_MASK),
+            cpu_physical_memory_rw(env_cpu(env)->as, pages[i] | (laddr & ~TARGET_PAGE_MASK),
                                    hostbuf, currlen, is_write);
             laddr += currlen;
-            hostbuf += currlen;
+            hostbuf = (void *)(((char *)hostbuf) + currlen);
             len -= currlen;
         }
     }
@@ -530,11 +515,7 @@ int s390_cpu_virt_mem_rw(S390CPU *cpu, vaddr laddr, uint8_t ar, void *hostbuf,
 void s390_cpu_virt_mem_handle_exc(S390CPU *cpu, uintptr_t ra)
 {
     /* KVM will handle the interrupt automatically, TCG has to exit the TB */
-#ifdef CONFIG_TCG
-    if (tcg_enabled()) {
-        cpu_loop_exit_restore(CPU(cpu), ra);
-    }
-#endif
+    cpu_loop_exit_restore(CPU(cpu), ra);
 }
 
 /**
@@ -563,6 +544,6 @@ int mmu_translate_real(CPUS390XState *env, target_ulong raddr, int rw,
 
     *addr = mmu_real2abs(env, raddr & TARGET_PAGE_MASK);
 
-    mmu_handle_skey(*addr, rw, flags);
+    mmu_handle_skey(env->uc, *addr, rw, flags);
     return 0;
 }

@@ -59,9 +59,7 @@
     | dh_sizemask(t5, 5) | dh_sizemask(t6, 6) | dh_sizemask(t7, 7) },
 
 #include "helper.h"
-#include "trace/generated-helpers.h"
-#include "tcg-runtime.h"
-#include "plugin-helpers.h"
+#include "accel/tcg/tcg-runtime.h"
 
 #undef str
 #undef DEF_HELPER_FLAGS_0

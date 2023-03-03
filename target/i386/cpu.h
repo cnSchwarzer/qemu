@@ -22,9 +22,7 @@
 
 #include "sysemu/tcg.h"
 #include "cpu-qom.h"
-#include "hyperv-proto.h"
 #include "exec/cpu-defs.h"
-#include "qapi/qapi-types-common.h"
 
 /* The x86 has a strong memory model with some store-after-load re-ordering */
 #define TCG_GUEST_DEFAULT_MO      (TCG_MO_ALL & ~TCG_MO_ST_LD)
@@ -1115,6 +1113,8 @@ typedef union {
     uint16_t _w[8];
     uint32_t _l[4];
     uint64_t _q[2];
+    float32 _s[4];
+    float64 _d[2];
 } XMMReg;
 
 typedef union {
@@ -1122,7 +1122,20 @@ typedef union {
     uint16_t _w[16];
     uint32_t _l[8];
     uint64_t _q[4];
+    float32 _s[8];
+    float64 _d[4];
 } YMMReg;
+
+#if 0
+typedef union {
+    uint8_t _b[64];
+    uint16_t _w[32];
+    uint32_t _l[16];
+    uint64_t _q[8];
+    float32 _s[16];
+    float64 _d[8];
+} ZMMReg;
+#endif
 
 typedef MMREG_UNION(ZMMReg, 512) ZMMReg;
 typedef MMREG_UNION(MMXReg, 64)  MMXReg;
@@ -1169,7 +1182,7 @@ typedef struct BNDCSReg {
 #define MMX_Q(n) _q_MMXReg[n]
 
 typedef union {
-    floatx80 d __attribute__((aligned(16)));
+    floatx80 QEMU_ALIGN(16, d);
     MMXReg mmx;
 } FPReg;
 
@@ -1393,7 +1406,7 @@ typedef struct CPUX86State {
     uint64_t efer;
 
     /* Beginning of state preserved by INIT (dummy marker).  */
-    struct {} start_init_save;
+    int start_init_save;
 
     /* FPU state */
     unsigned int fpstt; /* top of stack index */
@@ -1403,6 +1416,8 @@ typedef struct CPUX86State {
     FPReg fpregs[8];
     /* KVM-only so far */
     uint16_t fpop;
+    uint16_t fpcs;
+    uint16_t fpds;
     uint64_t fpip;
     uint64_t fpdp;
 
@@ -1468,7 +1483,7 @@ typedef struct CPUX86State {
     uint64_t virt_ssbd;
 
     /* End of state preserved by INIT (dummy marker).  */
-    struct {} end_init_save;
+    int end_init_save;
 
     uint64_t system_time_msr;
     uint64_t wall_clock_msr;
@@ -1476,32 +1491,6 @@ typedef struct CPUX86State {
     uint64_t async_pf_en_msr;
     uint64_t pv_eoi_en_msr;
     uint64_t poll_control_msr;
-
-    /* Partition-wide HV MSRs, will be updated only on the first vcpu */
-    uint64_t msr_hv_hypercall;
-    uint64_t msr_hv_guest_os_id;
-    uint64_t msr_hv_tsc;
-
-    /* Per-VCPU HV MSRs */
-    uint64_t msr_hv_vapic;
-    uint64_t msr_hv_crash_params[HV_CRASH_PARAMS];
-    uint64_t msr_hv_runtime;
-    uint64_t msr_hv_synic_control;
-    uint64_t msr_hv_synic_evt_page;
-    uint64_t msr_hv_synic_msg_page;
-    uint64_t msr_hv_synic_sint[HV_SINT_COUNT];
-    uint64_t msr_hv_stimer_config[HV_STIMER_COUNT];
-    uint64_t msr_hv_stimer_count[HV_STIMER_COUNT];
-    uint64_t msr_hv_reenlightenment_control;
-    uint64_t msr_hv_tsc_emulation_control;
-    uint64_t msr_hv_tsc_emulation_status;
-
-    uint64_t msr_rtit_ctrl;
-    uint64_t msr_rtit_status;
-    uint64_t msr_rtit_output_base;
-    uint64_t msr_rtit_output_mask;
-    uint64_t msr_rtit_cr3_match;
-    uint64_t msr_rtit_addrs[MAX_RTIT_ADDRS];
 
     /* exception/interrupt handling */
     int error_code;
@@ -1526,14 +1515,10 @@ typedef struct CPUX86State {
     uint32_t nested_pg_mode;
     uint8_t v_tpr;
 
-    /* KVM states, automatically cleared on reset */
-    uint8_t nmi_injected;
-    uint8_t nmi_pending;
-
     uintptr_t retaddr;
 
     /* Fields up to this point are cleared by a CPU reset */
-    struct {} end_reset_fields;
+    int end_reset_fields;
 
     /* Fields after this point are preserved across CPU reset. */
 
@@ -1582,15 +1567,6 @@ typedef struct CPUX86State {
     bool tsc_valid;
     int64_t tsc_khz;
     int64_t user_tsc_khz; /* for sanity check only */
-#if defined(CONFIG_KVM) || defined(CONFIG_HVF)
-    void *xsave_buf;
-#endif
-#if defined(CONFIG_KVM)
-    struct kvm_nested_state *nested_state;
-#endif
-#if defined(CONFIG_HVF)
-    HVFX86EmulatorState *hvf_emul;
-#endif
 
     uint64_t mcg_cap;
     uint64_t mcg_ctl;
@@ -1611,9 +1587,10 @@ typedef struct CPUX86State {
     unsigned nr_dies;
     unsigned nr_nodes;
     unsigned pkg_offset;
-} CPUX86State;
 
-struct kvm_msrs;
+    // Unicorn engine
+    struct uc_struct *uc;
+} CPUX86State;
 
 /**
  * X86CPU:
@@ -1633,13 +1610,6 @@ struct X86CPU {
     CPUX86State env;
 
     uint64_t ucode_rev;
-
-    uint32_t hyperv_spinlock_attempts;
-    char *hyperv_vendor_id;
-    bool hyperv_synic_kvm_only;
-    uint64_t hyperv_features;
-    bool hyperv_passthrough;
-    OnOffAuto hyperv_no_nonarch_cs;
 
     bool check_cpuid;
     bool enforce_cpuid;
@@ -1717,19 +1687,15 @@ struct X86CPU {
     /* if set, limit maximum value for phys_bits when host_phys_bits is true */
     uint8_t host_phys_bits_limit;
 
-    /* Stop SMI delivery for migration compatibility with old machines */
-    bool kvm_no_smi_migration;
-
     /* Number of physical address bits supported */
     uint32_t phys_bits;
 
+#if 0
     /* in order to simplify APIC support, we leave this pointer to the
        user */
     struct DeviceState *apic_state;
     struct MemoryRegion *cpu_as_root, *cpu_as_mem, *smram;
-    Notifier machine_done;
-
-    struct kvm_msrs *kvm_msr_buf;
+#endif
 
     int32_t node_id; /* NUMA node this CPU belongs to */
     int32_t socket_id;
@@ -1738,12 +1704,13 @@ struct X86CPU {
     int32_t thread_id;
 
     int32_t hv_max_vps;
+
+    struct X86CPUClass cc;
 };
 
-
-#ifndef CONFIG_USER_ONLY
-extern VMStateDescription vmstate_x86_cpu;
-#endif
+#define X86_CPU(obj) ((X86CPU *)obj)
+#define X86_CPU_CLASS(klass) ((X86CPUClass *)klass)
+#define X86_CPU_GET_CLASS(obj) (&((X86CPU *)obj)->cc)
 
 /**
  * x86_cpu_do_interrupt:
@@ -1753,36 +1720,21 @@ void x86_cpu_do_interrupt(CPUState *cpu);
 bool x86_cpu_exec_interrupt(CPUState *cpu, int int_req);
 int x86_cpu_pending_interrupt(CPUState *cs, int interrupt_request);
 
-int x86_cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cpu,
-                             int cpuid, void *opaque);
-int x86_cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cpu,
-                             int cpuid, void *opaque);
-int x86_cpu_write_elf64_qemunote(WriteCoreDumpFunction f, CPUState *cpu,
-                                 void *opaque);
-int x86_cpu_write_elf32_qemunote(WriteCoreDumpFunction f, CPUState *cpu,
-                                 void *opaque);
-
-void x86_cpu_get_memory_mapping(CPUState *cpu, MemoryMappingList *list,
-                                Error **errp);
-
-void x86_cpu_dump_state(CPUState *cs, FILE *f, int flags);
+void x86_cpu_get_memory_mapping(CPUState *cpu, MemoryMappingList *list);
 
 hwaddr x86_cpu_get_phys_page_attrs_debug(CPUState *cpu, vaddr addr,
                                          MemTxAttrs *attrs);
 
-int x86_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
-int x86_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
-
 void x86_cpu_exec_enter(CPUState *cpu);
 void x86_cpu_exec_exit(CPUState *cpu);
 
-void x86_cpu_list(void);
 int cpu_x86_support_mca_broadcast(CPUX86State *env);
 
 int cpu_get_pic_interrupt(CPUX86State *s);
 /* MSDOS compatibility mode FPU exception support */
 void x86_register_ferr_irq(qemu_irq irq);
-void cpu_set_ignne(void);
+void cpu_set_ignne(CPUX86State *env);
+
 /* mpx_helper.c */
 void cpu_sync_bndcs_hflags(CPUX86State *env);
 
@@ -1898,7 +1850,6 @@ void cpu_clear_apic_feature(CPUX86State *env);
 void host_cpuid(uint32_t function, uint32_t count,
                 uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx);
 void host_vendor_fms(char *vendor, int *family, int *model, int *stepping);
-bool cpu_x86_use_epyc_apic_id_encoding(const char *cpu_type);
 
 /* helper.c */
 bool x86_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
@@ -1906,7 +1857,6 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                       bool probe, uintptr_t retaddr);
 void x86_cpu_set_a20(X86CPU *cpu, int a20_state);
 
-#ifndef CONFIG_USER_ONLY
 static inline int x86_asidx_from_attrs(CPUState *cs, MemTxAttrs attrs)
 {
     return !!attrs.secure;
@@ -1926,7 +1876,6 @@ void x86_stl_phys_notdirty(CPUState *cs, hwaddr addr, uint32_t val);
 void x86_stw_phys(CPUState *cs, hwaddr addr, uint32_t val);
 void x86_stl_phys(CPUState *cs, hwaddr addr, uint32_t val);
 void x86_stq_phys(CPUState *cs, hwaddr addr, uint64_t val);
-#endif
 
 void breakpoint_handler(CPUState *cs);
 
@@ -1960,7 +1909,6 @@ uint64_t cpu_get_tsc(CPUX86State *env);
 #endif
 
 #define cpu_signal_handler cpu_x86_signal_handler
-#define cpu_list x86_cpu_list
 
 /* MMU modes definitions */
 #define MMU_KSMAP_IDX   0
@@ -2002,17 +1950,13 @@ static inline target_long lshift(target_long x, int n)
 #define ST1    ST(1)
 
 /* translate.c */
-void tcg_x86_init(void);
+void tcg_x86_init(struct uc_struct *uc);
 
 typedef CPUX86State CPUArchState;
 typedef X86CPU ArchCPU;
 
 #include "exec/cpu-all.h"
 #include "svm.h"
-
-#if !defined(CONFIG_USER_ONLY)
-#include "hw/i386/apic.h"
-#endif
 
 static inline void cpu_get_tb_cpu_state(CPUX86State *env, target_ulong *pc,
                                         target_ulong *cs_base, uint32_t *flags)
@@ -2025,13 +1969,6 @@ static inline void cpu_get_tb_cpu_state(CPUX86State *env, target_ulong *pc,
 
 void do_cpu_init(X86CPU *cpu);
 void do_cpu_sipi(X86CPU *cpu);
-
-#define MCE_INJECT_BROADCAST    1
-#define MCE_INJECT_UNCOND_AO    2
-
-void cpu_x86_inject_mce(Monitor *mon, X86CPU *cpu, int bank,
-                        uint64_t status, uint64_t mcg_status, uint64_t addr,
-                        uint64_t misc, int flags);
 
 /* excp_helper.c */
 void QEMU_NORETURN raise_exception(CPUX86State *env, int exception_index);
@@ -2050,11 +1987,7 @@ uint32_t cpu_cc_compute_all(CPUX86State *env1, int op);
 
 static inline uint32_t cpu_compute_eflags(CPUX86State *env)
 {
-    uint32_t eflags = env->eflags;
-    if (tcg_enabled()) {
-        eflags |= cpu_cc_compute_all(env, CC_OP) | (env->df & DF_MASK);
-    }
-    return eflags;
+    return (env->eflags & ~(CC_O | CC_S | CC_Z | CC_A | CC_P | CC_C | DF_MASK)) | cpu_cc_compute_all(env, CC_OP) | (env->df & DF_MASK);
 }
 
 /* NOTE: the translator must set DisasContext.cc_op to CC_OP_EFLAGS
@@ -2086,7 +2019,10 @@ static inline void cpu_load_efer(CPUX86State *env, uint64_t val)
 
 static inline MemTxAttrs cpu_get_mem_attrs(CPUX86State *env)
 {
-    return ((MemTxAttrs) { .secure = (env->hflags & HF_SMM_MASK) != 0 });
+    if ((env->hflags & HF_SMM_MASK) != 0)
+        return ((MemTxAttrs) { .secure = true });
+    else
+        return ((MemTxAttrs) { .secure = false });
 }
 
 static inline int32_t x86_get_a20_mask(CPUX86State *env)
@@ -2132,17 +2068,13 @@ void update_mxcsr_status(CPUX86State *env);
 static inline void cpu_set_mxcsr(CPUX86State *env, uint32_t mxcsr)
 {
     env->mxcsr = mxcsr;
-    if (tcg_enabled()) {
-        update_mxcsr_status(env);
-    }
+    update_mxcsr_status(env);
 }
 
 static inline void cpu_set_fpuc(CPUX86State *env, uint16_t fpuc)
 {
      env->fpuc = fpuc;
-     if (tcg_enabled()) {
-        update_fp_status(env);
-     }
+     update_fp_status(env);
 }
 
 /* mem_helper.c */
@@ -2160,22 +2092,6 @@ void do_interrupt_x86_hardirq(CPUX86State *env, int intno, int is_hw);
 
 /* smm_helper.c */
 void do_smm_enter(X86CPU *cpu);
-
-/* apic.c */
-void cpu_report_tpr_access(CPUX86State *env, TPRAccess access);
-void apic_handle_tpr_access_report(DeviceState *d, target_ulong ip,
-                                   TPRAccess access);
-
-
-/* Change the value of a KVM-specific default
- *
- * If value is NULL, no default will be set and the original
- * value from the CPU model table will be kept.
- *
- * It is valid to call this function only for properties that
- * are already present in the kvm_default_props table.
- */
-void x86_cpu_change_kvm_default(const char *prop, const char *value);
 
 /* Special values for X86CPUVersion: */
 
@@ -2202,12 +2118,8 @@ void x86_cpu_set_default_version(X86CPUVersion version);
 /* Return name of 32-bit register, from a R_* constant */
 const char *get_register_name_32(unsigned int reg);
 
-void enable_compat_apic_id_mode(void);
-
 #define APIC_DEFAULT_ADDRESS 0xfee00000
 #define APIC_SPACE_SIZE      0x100000
-
-void x86_cpu_dump_local_apic_state(CPUState *cs, int flags);
 
 /* cpu.c */
 bool cpu_is_bsp(X86CPU *cpu);
@@ -2216,15 +2128,7 @@ void x86_cpu_xrstor_all_areas(X86CPU *cpu, const X86XSaveArea *buf);
 void x86_cpu_xsave_all_areas(X86CPU *cpu, X86XSaveArea *buf);
 void x86_update_hflags(CPUX86State* env);
 
-static inline bool hyperv_feat_enabled(X86CPU *cpu, int feat)
-{
-    return !!(cpu->hyperv_features & BIT(feat));
-}
-
-#if defined(TARGET_X86_64) && \
-    defined(CONFIG_USER_ONLY) && \
-    defined(CONFIG_LINUX)
-# define TARGET_VSYSCALL_PAGE  (UINT64_C(-10) << 20)
-#endif
+int uc_check_cpu_x86_load_seg(CPUX86State *env, int seg_reg, int sel);
+X86CPU *cpu_x86_init(struct uc_struct *uc);
 
 #endif /* I386_CPU_H */

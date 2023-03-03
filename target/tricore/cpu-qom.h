@@ -15,30 +15,29 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+   Modified for Unicorn Engine by Eric Poole <eric.poole@aptiv.com>, 2022
+   Copyright 2022 Aptiv 
+*/
+
 #ifndef QEMU_TRICORE_CPU_QOM_H
 #define QEMU_TRICORE_CPU_QOM_H
 
 #include "hw/core/cpu.h"
 
-
 #define TYPE_TRICORE_CPU "tricore-cpu"
 
-#define TRICORE_CPU_CLASS(klass) \
-    OBJECT_CLASS_CHECK(TriCoreCPUClass, (klass), TYPE_TRICORE_CPU)
-#define TRICORE_CPU(obj) \
-    OBJECT_CHECK(TriCoreCPU, (obj), TYPE_TRICORE_CPU)
-#define TRICORE_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(TriCoreCPUClass, (obj), TYPE_TRICORE_CPU)
+#define TRICORE_CPU(obj) ((TriCoreCPU *)obj)
+#define TRICORE_CPU_CLASS(klass) ((TriCoreCPUClass *)klass)
+#define TRICORE_CPU_GET_CLASS(obj) (&((TriCoreCPU *)obj)->cc)
 
 typedef struct TriCoreCPUClass {
     /*< private >*/
     CPUClass parent_class;
     /*< public >*/
 
-    DeviceRealize parent_realize;
-    DeviceReset parent_reset;
+    void (*parent_reset)(CPUState *cpu);
 } TriCoreCPUClass;
 
-typedef struct TriCoreCPU TriCoreCPU;
 
 #endif /* QEMU_TRICORE_CPU_QOM_H */

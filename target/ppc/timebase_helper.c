@@ -20,8 +20,6 @@
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
-#include "qemu/log.h"
-#include "qemu/main-loop.h"
 
 /*****************************************************************************/
 /* SPR accesses */
@@ -51,7 +49,7 @@ target_ulong helper_load_vtb(CPUPPCState *env)
     return cpu_ppc_load_vtb(env);
 }
 
-#if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
+#if defined(TARGET_PPC64)
 target_ulong helper_load_purr(CPUPPCState *env)
 {
     return (target_ulong)cpu_ppc_load_purr(env);
@@ -73,7 +71,6 @@ target_ulong helper_load_601_rtcu(CPUPPCState *env)
     return cpu_ppc601_load_rtcu(env);
 }
 
-#if !defined(CONFIG_USER_ONLY)
 void helper_store_tbl(CPUPPCState *env, target_ulong val)
 {
     cpu_ppc_store_tbl(env, val);
@@ -153,7 +150,6 @@ void helper_store_booke_tsr(CPUPPCState *env, target_ulong val)
 {
     store_booke_tsr(env, val);
 }
-#endif
 
 /*****************************************************************************/
 /* Embedded PowerPC specific helpers */
@@ -171,12 +167,12 @@ target_ulong helper_load_dcr(CPUPPCState *env, target_ulong dcrn)
     } else {
         int ret;
 
-        qemu_mutex_lock_iothread();
         ret = ppc_dcr_read(env->dcr_env, (uint32_t)dcrn, &val);
-        qemu_mutex_unlock_iothread();
         if (unlikely(ret != 0)) {
+#if 0
             qemu_log_mask(LOG_GUEST_ERROR, "DCR read error %d %03x\n",
                           (uint32_t)dcrn, (uint32_t)dcrn);
+#endif
             raise_exception_err_ra(env, POWERPC_EXCP_PROGRAM,
                                    POWERPC_EXCP_INVAL |
                                    POWERPC_EXCP_PRIV_REG, GETPC());
@@ -188,18 +184,20 @@ target_ulong helper_load_dcr(CPUPPCState *env, target_ulong dcrn)
 void helper_store_dcr(CPUPPCState *env, target_ulong dcrn, target_ulong val)
 {
     if (unlikely(env->dcr_env == NULL)) {
+#if 0
         qemu_log_mask(LOG_GUEST_ERROR, "No DCR environment\n");
+#endif
         raise_exception_err_ra(env, POWERPC_EXCP_PROGRAM,
                                POWERPC_EXCP_INVAL |
                                POWERPC_EXCP_INVAL_INVAL, GETPC());
     } else {
         int ret;
-        qemu_mutex_lock_iothread();
         ret = ppc_dcr_write(env->dcr_env, (uint32_t)dcrn, (uint32_t)val);
-        qemu_mutex_unlock_iothread();
         if (unlikely(ret != 0)) {
+#if 0
             qemu_log_mask(LOG_GUEST_ERROR, "DCR write error %d %03x\n",
                           (uint32_t)dcrn, (uint32_t)dcrn);
+#endif
             raise_exception_err_ra(env, POWERPC_EXCP_PROGRAM,
                                    POWERPC_EXCP_INVAL |
                                    POWERPC_EXCP_PRIV_REG, GETPC());

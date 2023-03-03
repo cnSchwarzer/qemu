@@ -51,7 +51,14 @@
 static inline uint32_t
 qemu_xxhash7(uint64_t ab, uint64_t cd, uint32_t e, uint32_t f, uint32_t g)
 {
+#ifdef _WIN32
+    uint64_t v1x = QEMU_XXHASH_SEED;
+    v1x += PRIME32_1;
+    v1x += PRIME32_2;
+    uint32_t v1 = v1x;
+#else
     uint32_t v1 = QEMU_XXHASH_SEED + PRIME32_1 + PRIME32_2;
+#endif
     uint32_t v2 = QEMU_XXHASH_SEED + PRIME32_2;
     uint32_t v3 = QEMU_XXHASH_SEED + 0;
     uint32_t v4 = QEMU_XXHASH_SEED - PRIME32_1;

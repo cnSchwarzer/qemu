@@ -25,16 +25,24 @@
 #include "fpu/softfloat.h"
 
 /* Data format min and max values */
-#define DF_BITS(df) (1 << ((df) + 3))
+#define DF_BITS(df) (1ULL << ((df) + 3))
 
 #define DF_MAX_INT(df)  (int64_t)((1LL << (DF_BITS(df) - 1)) - 1)
 #define M_MAX_INT(m)    (int64_t)((1LL << ((m)         - 1)) - 1)
 
+#ifdef _MSC_VER
+#define DF_MIN_INT(df)  (int64_t)(0 - (1LL << (DF_BITS(df) - 1)))
+#define M_MIN_INT(m)    (int64_t)(0 - (1LL << ((m)         - 1)))
+
+#define DF_MAX_UINT(df) (uint64_t)(0xffffffffffffffffULL >> (64 - DF_BITS(df)))
+#define M_MAX_UINT(m)   (uint64_t)(0xffffffffffffffffULL >> (64 - (m)))
+#else
 #define DF_MIN_INT(df)  (int64_t)(-(1LL << (DF_BITS(df) - 1)))
 #define M_MIN_INT(m)    (int64_t)(-(1LL << ((m)         - 1)))
 
 #define DF_MAX_UINT(df) (uint64_t)(-1ULL >> (64 - DF_BITS(df)))
 #define M_MAX_UINT(m)   (uint64_t)(-1ULL >> (64 - (m)))
+#endif
 
 #define UNSIGNED(x, df) ((x) & DF_MAX_UINT(df))
 #define SIGNED(x, df)                                                   \
@@ -4734,7 +4742,7 @@ static inline int64_t msa_mulr_q_df(uint32_t df, int64_t arg1, int64_t arg2)
 {
     int64_t q_min = DF_MIN_INT(df);
     int64_t q_max = DF_MAX_INT(df);
-    int64_t r_bit = 1 << (DF_BITS(df) - 2);
+    int64_t r_bit = 1ULL << (DF_BITS(df) - 2);
 
     if (arg1 == q_min && arg2 == q_min) {
         return q_max;
@@ -4911,7 +4919,7 @@ static inline int64_t msa_maddr_q_df(uint32_t df, int64_t dest, int64_t arg1,
 
     int64_t q_max = DF_MAX_INT(df);
     int64_t q_min = DF_MIN_INT(df);
-    int64_t r_bit = 1 << (DF_BITS(df) - 2);
+    int64_t r_bit = 1ULL << (DF_BITS(df) - 2);
 
     q_prod = arg1 * arg2;
     q_ret = ((dest << (DF_BITS(df) - 1)) + q_prod + r_bit) >> (DF_BITS(df) - 1);
@@ -4926,7 +4934,7 @@ static inline int64_t msa_msubr_q_df(uint32_t df, int64_t dest, int64_t arg1,
 
     int64_t q_max = DF_MAX_INT(df);
     int64_t q_min = DF_MIN_INT(df);
-    int64_t r_bit = 1 << (DF_BITS(df) - 2);
+    int64_t r_bit = 1ULL << (DF_BITS(df) - 2);
 
     q_prod = arg1 * arg2;
     q_ret = ((dest << (DF_BITS(df) - 1)) - q_prod + r_bit) >> (DF_BITS(df) - 1);

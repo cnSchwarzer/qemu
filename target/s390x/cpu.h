@@ -28,6 +28,7 @@
 #include "cpu-qom.h"
 #include "cpu_models.h"
 #include "exec/cpu-defs.h"
+#include "hw/s390x/storage-keys.h"
 
 #define ELF_MACHINE_UNAME "S390X"
 
@@ -58,7 +59,7 @@ struct CPUS390XState {
     uint64_t etoken_extension; /* etoken extension */
 
     /* Fields up to this point are not cleared by initial CPU reset */
-    struct {} start_initial_reset_fields;
+    int start_initial_reset_fields;
 
     uint32_t fpc;          /* floating-point control register */
     uint32_t cc_op;
@@ -71,7 +72,7 @@ struct CPUS390XState {
 
     PSW psw;
 
-    S390CrashReason crash_reason;
+    // S390CrashReason crash_reason;
 
     uint64_t cc_src;
     uint64_t cc_dst;
@@ -105,7 +106,7 @@ struct CPUS390XState {
     uint64_t pp;
 
     /* Fields up to this point are not cleared by normal CPU reset */
-    struct {} start_normal_reset_fields;
+    int start_normal_reset_fields;
     uint8_t riccb[64];     /* runtime instrumentation control */
 
     int pending_int;
@@ -113,16 +114,14 @@ struct CPUS390XState {
     DECLARE_BITMAP(emergency_signals, S390_MAX_CPUS);
 
     /* Fields up to this point are cleared by a CPU reset */
-    struct {} end_reset_fields;
+    int end_reset_fields;
 
-#if !defined(CONFIG_USER_ONLY)
     uint32_t core_id; /* PoP "CPU address", same as cpu_index */
     uint64_t cpuid;
-#endif
 
-    QEMUTimer *tod_timer;
+    // QEMUTimer *tod_timer;
 
-    QEMUTimer *cpu_timer;
+    // QEMUTimer *cpu_timer;
 
     /*
      * The cpu state represents the logical state of a cpu. In contrast to other
@@ -137,6 +136,8 @@ struct CPUS390XState {
     /* currently processed sigp order */
     uint8_t sigp_order;
 
+    // Unicorn engine
+    struct uc_struct *uc;
 };
 
 static inline uint64_t *get_freg(CPUS390XState *cs, int nr)
@@ -159,14 +160,15 @@ struct S390CPU {
     CPUS390XState env;
     S390CPUModel *model;
     /* needed for live migration */
-    void *irqstate;
-    uint32_t irqstate_saved_size;
+    // void *irqstate;
+    // uint32_t irqstate_saved_size;
+
+    // unicorn
+    struct S390CPUClass cc;
+    struct S390SKeysClass skey;
+    struct QEMUS390SKeysState ss;
 };
 
-
-#ifndef CONFIG_USER_ONLY
-extern const VMStateDescription vmstate_s390_cpu;
-#endif
 
 /* distinguish between 24 bit and 31 bit addressing */
 #define HIGH_ORDER_BIT 0x80000000
@@ -335,9 +337,6 @@ extern const VMStateDescription vmstate_s390_cpu;
 
 static inline int cpu_mmu_index(CPUS390XState *env, bool ifetch)
 {
-#ifdef CONFIG_USER_ONLY
-    return MMU_USER_IDX;
-#else
     if (!(env->psw.mask & PSW_MASK_DAT)) {
         return MMU_REAL_IDX;
     }
@@ -361,7 +360,6 @@ static inline int cpu_mmu_index(CPUS390XState *env, bool ifetch)
     default:
         abort();
     }
-#endif
 }
 
 static inline void cpu_get_tb_cpu_state(CPUS390XState* env, target_ulong *pc,
@@ -714,7 +712,7 @@ QEMU_BUILD_BUG_ON(sizeof(SysIB) != 4096);
 #define MCIC_VB_CT 0x0000000000020000ULL
 #define MCIC_VB_CC 0x0000000000010000ULL
 
-static inline uint64_t s390_build_validity_mcic(void)
+static inline uint64_t s390_build_validity_mcic(struct uc_struct *uc)
 {
     uint64_t mcic;
 
@@ -725,10 +723,10 @@ static inline uint64_t s390_build_validity_mcic(void)
     mcic = MCIC_VB_WP | MCIC_VB_MS | MCIC_VB_PM | MCIC_VB_IA | MCIC_VB_FP |
            MCIC_VB_GR | MCIC_VB_CR | MCIC_VB_ST | MCIC_VB_AR | MCIC_VB_PR |
            MCIC_VB_FC | MCIC_VB_CT | MCIC_VB_CC;
-    if (s390_has_feat(S390_FEAT_VECTOR)) {
+    if (s390_has_feat(uc, S390_FEAT_VECTOR)) {
         mcic |= MCIC_VB_VR;
     }
-    if (s390_has_feat(S390_FEAT_GUARDED_STORAGE)) {
+    if (s390_has_feat(uc, S390_FEAT_GUARDED_STORAGE)) {
         mcic |= MCIC_VB_GS;
     }
     return mcic;
@@ -764,19 +762,12 @@ static inline void s390_do_cpu_load_normal(CPUState *cs, run_on_cpu_data arg)
 /* cpu.c */
 void s390_crypto_reset(void);
 int s390_set_memory_limit(uint64_t new_limit, uint64_t *hw_limit);
-void s390_set_max_pagesize(uint64_t pagesize, Error **errp);
+void s390_set_max_pagesize(uint64_t pagesize);
 void s390_cmma_reset(void);
 void s390_enable_css_support(S390CPU *cpu);
-int s390_assign_subch_ioeventfd(EventNotifier *notifier, uint32_t sch_id,
-                                int vq, bool assign);
-#ifndef CONFIG_USER_ONLY
+
 unsigned int s390_cpu_set_state(uint8_t cpu_state, S390CPU *cpu);
-#else
-static inline unsigned int s390_cpu_set_state(uint8_t cpu_state, S390CPU *cpu)
-{
-    return 0;
-}
-#endif /* CONFIG_USER_ONLY */
+
 static inline uint8_t s390_cpu_get_state(S390CPU *cpu)
 {
     return cpu->env.cpu_state;
@@ -837,5 +828,14 @@ typedef CPUS390XState CPUArchState;
 typedef S390CPU ArchCPU;
 
 #include "exec/cpu-all.h"
+
+typedef enum CpuS390State {
+    S390_CPU_STATE_UNINITIALIZED,
+    S390_CPU_STATE_STOPPED,
+    S390_CPU_STATE_CHECK_STOP,
+    S390_CPU_STATE_OPERATING,
+    S390_CPU_STATE_LOAD,
+    S390_CPU_STATE__MAX,
+} CpuS390State;
 
 #endif

@@ -28,9 +28,9 @@
 #include "exec/cpu_ldst.h"
 #include "exec/exec-all.h"
 #include "exec/tb-lookup.h"
-#include "disas/disas.h"
-#include "exec/log.h"
 #include "tcg/tcg.h"
+
+#include <uc_priv.h>
 
 /* 32-bit helpers */
 
@@ -151,16 +151,12 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
     TranslationBlock *tb;
     target_ulong cs_base, pc;
     uint32_t flags;
+    struct uc_struct *uc = (struct uc_struct *)cpu->uc;
 
     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, curr_cflags());
     if (tb == NULL) {
-        return tcg_ctx->code_gen_epilogue;
+        return uc->tcg_ctx->code_gen_epilogue;
     }
-    qemu_log_mask_and_addr(CPU_LOG_EXEC, pc,
-                           "Chain %d: %p ["
-                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
-                           cpu->cpu_index, tb->tc.ptr, cs_base, pc, flags,
-                           lookup_symbol(pc));
     return tb->tc.ptr;
 }
 

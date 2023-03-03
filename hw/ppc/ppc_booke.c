@@ -26,11 +26,8 @@
 #include "cpu.h"
 #include "hw/ppc/ppc.h"
 #include "qemu/timer.h"
-#include "sysemu/reset.h"
-#include "sysemu/runstate.h"
 #include "qemu/log.h"
-#include "hw/loader.h"
-#include "kvm_ppc.h"
+// #include "kvm_ppc.h"
 
 
 /* Timer Control Register */
@@ -133,6 +130,7 @@ static void booke_update_fixed_timer(CPUPPCState         *env,
                                      QEMUTimer         *timer,
                                      int               tsr_bit)
 {
+#if 0
     ppc_tb_t *tb_env = env->tb_env;
     uint64_t delta_tick, ticks = 0;
     uint64_t tb;
@@ -186,6 +184,7 @@ static void booke_update_fixed_timer(CPUPPCState         *env,
 
     /* Fire the next timer */
     timer_mod(timer, *next);
+#endif
 }
 
 static void booke_decr_cb(void *opaque)
@@ -254,7 +253,7 @@ void store_booke_tsr(CPUPPCState *env, target_ulong val)
     booke_timer_t *booke_timer = tb_env->opaque;
 
     env->spr[SPR_BOOKE_TSR] &= ~val;
-    kvmppc_clear_tsr_bits(cpu, val);
+    // kvmppc_clear_tsr_bits(cpu, val);
 
     if (val & TSR_FIS) {
         booke_update_fixed_timer(env,
@@ -282,7 +281,7 @@ void store_booke_tcr(CPUPPCState *env, target_ulong val)
     booke_timer_t *booke_timer = tb_env->opaque;
 
     env->spr[SPR_BOOKE_TCR] = val;
-    kvmppc_set_tcr(cpu);
+    // kvmppc_set_tcr(cpu);
 
     booke_update_irq(cpu);
 
@@ -299,6 +298,7 @@ void store_booke_tcr(CPUPPCState *env, target_ulong val)
                              TSR_WIS);
 }
 
+#if 0
 static void ppc_booke_timer_reset_handle(void *opaque)
 {
     PowerPCCPU *cpu = opaque;
@@ -331,12 +331,12 @@ static void cpu_state_change_handler(void *opaque, int running, RunState state)
      */
     store_booke_tsr(env, TSR_ENW | TSR_WIS | TSR_WRS_MASK);
 }
+#endif
 
 void ppc_booke_timers_init(PowerPCCPU *cpu, uint32_t freq, uint32_t flags)
 {
     ppc_tb_t *tb_env;
     booke_timer_t *booke_timer;
-    int ret = 0;
 
     tb_env      = g_malloc0(sizeof(ppc_tb_t));
     booke_timer = g_malloc0(sizeof(booke_timer_t));
@@ -354,6 +354,8 @@ void ppc_booke_timers_init(PowerPCCPU *cpu, uint32_t freq, uint32_t flags)
     booke_timer->wdt_timer =
         timer_new_ns(QEMU_CLOCK_VIRTUAL, &booke_wdt_cb, cpu);
 
+#if 0
+    int ret = 0;
     ret = kvmppc_booke_watchdog_enable(cpu);
 
     if (ret) {
@@ -367,4 +369,5 @@ void ppc_booke_timers_init(PowerPCCPU *cpu, uint32_t freq, uint32_t flags)
     qemu_add_vm_change_state_handler(cpu_state_change_handler, cpu);
 
     qemu_register_reset(ppc_booke_timer_reset_handle, cpu);
+#endif
 }

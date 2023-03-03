@@ -28,12 +28,9 @@
 #define TYPE_MIPS_CPU "mips-cpu"
 #endif
 
-#define MIPS_CPU_CLASS(klass) \
-    OBJECT_CLASS_CHECK(MIPSCPUClass, (klass), TYPE_MIPS_CPU)
-#define MIPS_CPU(obj) \
-    OBJECT_CHECK(MIPSCPU, (obj), TYPE_MIPS_CPU)
-#define MIPS_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(MIPSCPUClass, (obj), TYPE_MIPS_CPU)
+#define MIPS_CPU(obj) ((MIPSCPU *)obj)
+#define MIPS_CPU_CLASS(klass) ((MIPSCPUClass *)klass)
+#define MIPS_CPU_GET_CLASS(obj) (&((MIPSCPU *)obj)->cc)
 
 /**
  * MIPSCPUClass:
@@ -47,9 +44,7 @@ typedef struct MIPSCPUClass {
     CPUClass parent_class;
     /*< public >*/
 
-    DeviceRealize parent_realize;
-    DeviceReset parent_reset;
-    const struct mips_def_t *cpu_def;
+    void (*parent_reset)(CPUState *cpu);
 } MIPSCPUClass;
 
 typedef struct MIPSCPU MIPSCPU;

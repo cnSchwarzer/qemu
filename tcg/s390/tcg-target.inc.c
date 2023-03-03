@@ -1547,6 +1547,9 @@ QEMU_BUILD_BUG_ON(TLB_MASK_TABLE_OFS(0) < -(1 << 19));
 static TCGReg tcg_out_tlb_read(TCGContext *s, TCGReg addr_reg, MemOp opc,
                                int mem_index, bool is_ld)
 {
+#ifdef TARGET_ARM
+    struct uc_struct *uc = s->uc;
+#endif
     unsigned s_bits = opc & MO_SIZE;
     unsigned a_bits = get_alignment_bits(opc);
     unsigned s_mask = (1 << s_bits) - 1;
@@ -2503,21 +2506,21 @@ static void tcg_target_init(TCGContext *s)
 {
     query_s390_facilities();
 
-    tcg_target_available_regs[TCG_TYPE_I32] = 0xffff;
-    tcg_target_available_regs[TCG_TYPE_I64] = 0xffff;
+    s->tcg_target_available_regs[TCG_TYPE_I32] = 0xffff;
+    s->tcg_target_available_regs[TCG_TYPE_I64] = 0xffff;
 
-    tcg_target_call_clobber_regs = 0;
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R0);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R1);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R2);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R3);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R4);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R5);
+    s->tcg_target_call_clobber_regs = 0;
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R0);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R1);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R2);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R3);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R4);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R5);
     /* The r6 register is technically call-saved, but it's also a parameter
        register, so it can get killed by setup for the qemu_st helper.  */
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R6);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R6);
     /* The return register can be considered call-clobbered.  */
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R14);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R14);
 
     s->reserved_regs = 0;
     tcg_regset_set_reg(s->reserved_regs, TCG_TMP0);
@@ -2624,7 +2627,7 @@ static const DebugFrame debug_frame = {
     }
 };
 
-void tcg_register_jit(void *buf, size_t buf_size)
+void tcg_register_jit(TCGContext *s, void *buf, size_t buf_size)
 {
-    tcg_register_jit_int(buf, buf_size, &debug_frame, sizeof(debug_frame));
+    tcg_register_jit_int(s, buf, buf_size, &debug_frame, sizeof(debug_frame));
 }

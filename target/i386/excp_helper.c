@@ -21,8 +21,10 @@
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "qemu/log.h"
-#include "sysemu/runstate.h"
 #include "exec/helper-proto.h"
+#include "sysemu/sysemu.h"
+
+#include "uc_priv.h"
 
 void helper_raise_interrupt(CPUX86State *env, int intno, int next_eip_addend)
 {
@@ -51,7 +53,6 @@ static int check_exception(CPUX86State *env, int intno, int *error_code,
     qemu_log_mask(CPU_LOG_INT, "check_exception old: 0x%x new 0x%x\n",
                 env->old_exception, intno);
 
-#if !defined(CONFIG_USER_ONLY)
     if (env->old_exception == EXCP08_DBLE) {
         if (env->hflags & HF_GUEST_MASK) {
             cpu_vmexit(env, SVM_EXIT_SHUTDOWN, 0, retaddr); /* does not return */
@@ -59,10 +60,9 @@ static int check_exception(CPUX86State *env, int intno, int *error_code,
 
         qemu_log_mask(CPU_LOG_RESET, "Triple fault\n");
 
-        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+        qemu_system_reset_request(env->uc);
         return EXCP_HLT;
     }
-#endif
 
     if ((first_contributory && second_contributory)
         || (env->old_exception == EXCP0E_PAGE &&
@@ -137,7 +137,6 @@ void raise_exception_ra(CPUX86State *env, int exception_index, uintptr_t retaddr
     raise_interrupt2(env, exception_index, 0, 0, 0, retaddr);
 }
 
-#if !defined(CONFIG_USER_ONLY)
 static hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
                         int *prot)
 {
@@ -630,6 +629,7 @@ do_check_protect_pse36:
     }
 
  do_mapping:
+
     pte = pte & a20_mask;
 
     /* align to page_size */
@@ -641,8 +641,13 @@ do_check_protect_pse36:
        avoid filling it too fast */
     vaddr = addr & TARGET_PAGE_MASK;
     paddr &= TARGET_PAGE_MASK;
-
     assert(prot & (1 << is_write1));
+
+    // Unicorn: indentity map guest virtual address to host virtual address
+    vaddr = addr & TARGET_PAGE_MASK;
+    paddr = vaddr;
+    //printf(">>> map address %"PRIx64" to %"PRIx64"\n", vaddr, paddr);
+ 
     tlb_set_page_with_attrs(cs, vaddr, paddr, cpu_get_mem_attrs(env),
                             prot, mmu_idx, page_size);
     return 0;
@@ -671,7 +676,6 @@ do_check_protect_pse36:
     cs->exception_index = EXCP0E_PAGE;
     return 1;
 }
-#endif
 
 bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
                       MMUAccessType access_type, int mmu_idx,
@@ -680,16 +684,6 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
 
-#ifdef CONFIG_USER_ONLY
-    /* user mode only emulation */
-    env->cr[2] = addr;
-    env->error_code = (access_type == MMU_DATA_STORE) << PG_ERROR_W_BIT;
-    env->error_code |= PG_ERROR_U_MASK;
-    cs->exception_index = EXCP0E_PAGE;
-    env->exception_is_int = 0;
-    env->exception_next_eip = -1;
-    cpu_loop_exit_restore(cs, retaddr);
-#else
     env->retaddr = retaddr;
     if (handle_mmu_fault(cs, addr, size, access_type, mmu_idx)) {
         /* FIXME: On error in get_hphys we have already jumped out.  */
@@ -698,5 +692,4 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
                                env->error_code, retaddr);
     }
     return true;
-#endif
 }

@@ -10,16 +10,12 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "cpu.h"
-#include "kvm_s390x.h"
 #include "internal.h"
 #include "exec/exec-all.h"
-#include "sysemu/kvm.h"
 #include "sysemu/tcg.h"
 #include "hw/s390x/ioinst.h"
 #include "tcg_s390x.h"
-#if !defined(CONFIG_USER_ONLY)
-#include "hw/s390x/s390_flic.h"
-#endif
+//#include "hw/s390x/s390_flic.h"
 
 /* Ensure to exit the TB after this call! */
 void trigger_pgm_exception(CPUS390XState *env, uint32_t code)
@@ -33,16 +29,9 @@ void trigger_pgm_exception(CPUS390XState *env, uint32_t code)
 
 void s390_program_interrupt(CPUS390XState *env, uint32_t code, uintptr_t ra)
 {
-    if (kvm_enabled()) {
-        kvm_s390_program_interrupt(env_archcpu(env), code);
-    } else if (tcg_enabled()) {
-        tcg_s390_program_interrupt(env, code, ra);
-    } else {
-        g_assert_not_reached();
-    }
+    tcg_s390_program_interrupt(env, code, ra);
 }
 
-#if !defined(CONFIG_USER_ONLY)
 void cpu_inject_clock_comparator(S390CPU *cpu)
 {
     CPUS390XState *env = &cpu->env;
@@ -89,11 +78,6 @@ void cpu_inject_restart(S390CPU *cpu)
 {
     CPUS390XState *env = &cpu->env;
 
-    if (kvm_enabled()) {
-        kvm_s390_restart_interrupt(cpu);
-        return;
-    }
-
     env->pending_int |= INTERRUPT_RESTART;
     cpu_interrupt(CPU(cpu), CPU_INTERRUPT_HARD);
 }
@@ -101,11 +85,6 @@ void cpu_inject_restart(S390CPU *cpu)
 void cpu_inject_stop(S390CPU *cpu)
 {
     CPUS390XState *env = &cpu->env;
-
-    if (kvm_enabled()) {
-        kvm_s390_stop_interrupt(cpu);
-        return;
-    }
 
     env->pending_int |= INTERRUPT_STOP;
     cpu_interrupt(CPU(cpu), CPU_INTERRUPT_HARD);
@@ -118,31 +97,38 @@ void cpu_inject_stop(S390CPU *cpu)
  */
 void s390_sclp_extint(uint32_t parm)
 {
+#if 0
     S390FLICState *fs = s390_get_flic();
     S390FLICStateClass *fsc = s390_get_flic_class(fs);
 
     fsc->inject_service(fs, parm);
+#endif
 }
 
 void s390_io_interrupt(uint16_t subchannel_id, uint16_t subchannel_nr,
                        uint32_t io_int_parm, uint32_t io_int_word)
 {
+#if 0
     S390FLICState *fs = s390_get_flic();
     S390FLICStateClass *fsc = s390_get_flic_class(fs);
 
     fsc->inject_io(fs, subchannel_id, subchannel_nr, io_int_parm, io_int_word);
+#endif
 }
 
 void s390_crw_mchk(void)
 {
+#if 0
     S390FLICState *fs = s390_get_flic();
     S390FLICStateClass *fsc = s390_get_flic_class(fs);
 
     fsc->inject_crw_mchk(fs);
+#endif
 }
 
 bool s390_cpu_has_mcck_int(S390CPU *cpu)
 {
+#if 0
     QEMUS390FLICState *flic = s390_get_qemu_flic(s390_get_flic());
     CPUS390XState *env = &cpu->env;
 
@@ -155,12 +141,14 @@ bool s390_cpu_has_mcck_int(S390CPU *cpu)
         (env->cregs[14] & CR14_CHANNEL_REPORT_SC)) {
         return true;
     }
+#endif
 
     return false;
 }
 
 bool s390_cpu_has_ext_int(S390CPU *cpu)
 {
+#if 0
     QEMUS390FLICState *flic = s390_get_qemu_flic(s390_get_flic());
     CPUS390XState *env = &cpu->env;
 
@@ -197,12 +185,14 @@ bool s390_cpu_has_ext_int(S390CPU *cpu)
         (env->cregs[0] & CR0_SERVICE_SC)) {
         return true;
     }
+#endif
 
     return false;
 }
 
 bool s390_cpu_has_io_int(S390CPU *cpu)
 {
+#if 0
     QEMUS390FLICState *flic = s390_get_qemu_flic(s390_get_flic());
     CPUS390XState *env = &cpu->env;
 
@@ -211,13 +201,19 @@ bool s390_cpu_has_io_int(S390CPU *cpu)
     }
 
     return qemu_s390_flic_has_io(flic, env->cregs[6]);
+#endif
+
+    return false;
 }
 
 bool s390_cpu_has_restart_int(S390CPU *cpu)
 {
+    return false;
+#if 0
     CPUS390XState *env = &cpu->env;
 
     return env->pending_int & INTERRUPT_RESTART;
+#endif
 }
 
 bool s390_cpu_has_stop_int(S390CPU *cpu)
@@ -226,20 +222,12 @@ bool s390_cpu_has_stop_int(S390CPU *cpu)
 
     return env->pending_int & INTERRUPT_STOP;
 }
-#endif
 
 bool s390_cpu_has_int(S390CPU *cpu)
 {
-#ifndef CONFIG_USER_ONLY
-    if (!tcg_enabled()) {
-        return false;
-    }
     return s390_cpu_has_mcck_int(cpu) ||
            s390_cpu_has_ext_int(cpu) ||
            s390_cpu_has_io_int(cpu) ||
            s390_cpu_has_restart_int(cpu) ||
            s390_cpu_has_stop_int(cpu);
-#else
-    return false;
-#endif
 }

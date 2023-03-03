@@ -18,7 +18,6 @@
  */
 #include "qemu/osdep.h"
 #include "qemu/log.h"
-#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "internals.h"
@@ -408,9 +407,7 @@ void HELPER(cpsr_write_eret)(CPUARMState *env, uint32_t val)
 {
     uint32_t mask;
 
-    qemu_mutex_lock_iothread();
     arm_call_pre_el_change_hook(env_archcpu(env));
-    qemu_mutex_unlock_iothread();
 
     mask = aarch32_cpsr_valid_mask(env->features, &env_archcpu(env)->isar);
     cpsr_write(env, val, mask, CPSRWriteExceptionReturn);
@@ -423,9 +420,7 @@ void HELPER(cpsr_write_eret)(CPUARMState *env, uint32_t val)
     env->regs[15] &= (env->thumb ? ~1 : ~3);
     arm_rebuild_hflags(env);
 
-    qemu_mutex_lock_iothread();
     arm_call_el_change_hook(env_archcpu(env));
-    qemu_mutex_unlock_iothread();
 }
 
 /* Access to user mode registers from privileged modes.  */
@@ -509,24 +504,25 @@ static void msr_mrs_banked_exc_checks(CPUARMState *env, uint32_t tgtmode,
     }
 
     if (tgtmode == ARM_CPU_MODE_USR) {
-        switch (regno) {
-        case 8 ... 12:
+        if (regno >= 8 && regno <= 12) {
             if (curmode != ARM_CPU_MODE_FIQ) {
                 goto undef;
             }
-            break;
-        case 13:
-            if (curmode == ARM_CPU_MODE_SYS) {
-                goto undef;
+        } else {
+            switch (regno) {
+                case 13:
+                    if (curmode == ARM_CPU_MODE_SYS) {
+                        goto undef;
+                    }
+                    break;
+                case 14:
+                    if (curmode == ARM_CPU_MODE_HYP || curmode == ARM_CPU_MODE_SYS) {
+                        goto undef;
+                    }
+                    break;
+                default:
+                    break;
             }
-            break;
-        case 14:
-            if (curmode == ARM_CPU_MODE_HYP || curmode == ARM_CPU_MODE_SYS) {
-                goto undef;
-            }
-            break;
-        default:
-            break;
         }
     }
 
@@ -549,33 +545,35 @@ void HELPER(msr_banked)(CPUARMState *env, uint32_t value, uint32_t tgtmode,
 {
     msr_mrs_banked_exc_checks(env, tgtmode, regno);
 
-    switch (regno) {
-    case 16: /* SPSRs */
-        env->banked_spsr[bank_number(tgtmode)] = value;
-        break;
-    case 17: /* ELR_Hyp */
-        env->elr_el[2] = value;
-        break;
-    case 13:
-        env->banked_r13[bank_number(tgtmode)] = value;
-        break;
-    case 14:
-        env->banked_r14[r14_bank_number(tgtmode)] = value;
-        break;
-    case 8 ... 12:
+    if (regno >= 8 && regno <= 12) {
         switch (tgtmode) {
-        case ARM_CPU_MODE_USR:
-            env->usr_regs[regno - 8] = value;
-            break;
-        case ARM_CPU_MODE_FIQ:
-            env->fiq_regs[regno - 8] = value;
-            break;
-        default:
-            g_assert_not_reached();
+            case ARM_CPU_MODE_USR:
+                env->usr_regs[regno - 8] = value;
+                break;
+            case ARM_CPU_MODE_FIQ:
+                env->fiq_regs[regno - 8] = value;
+                break;
+            default:
+                // g_assert_not_reached();
+                break;
         }
-        break;
-    default:
-        g_assert_not_reached();
+    } else {
+        switch (regno) {
+            case 16: /* SPSRs */
+                env->banked_spsr[bank_number(tgtmode)] = value;
+                break;
+            case 17: /* ELR_Hyp */
+                env->elr_el[2] = value;
+                break;
+            case 13:
+                env->banked_r13[bank_number(tgtmode)] = value;
+                break;
+            case 14:
+                env->banked_r14[r14_bank_number(tgtmode)] = value;
+                break;
+            default:
+                g_assert_not_reached();
+        }
     }
 }
 
@@ -583,26 +581,32 @@ uint32_t HELPER(mrs_banked)(CPUARMState *env, uint32_t tgtmode, uint32_t regno)
 {
     msr_mrs_banked_exc_checks(env, tgtmode, regno);
 
-    switch (regno) {
-    case 16: /* SPSRs */
-        return env->banked_spsr[bank_number(tgtmode)];
-    case 17: /* ELR_Hyp */
-        return env->elr_el[2];
-    case 13:
-        return env->banked_r13[bank_number(tgtmode)];
-    case 14:
-        return env->banked_r14[r14_bank_number(tgtmode)];
-    case 8 ... 12:
+    if (regno >= 8 && regno <= 12) {
         switch (tgtmode) {
-        case ARM_CPU_MODE_USR:
-            return env->usr_regs[regno - 8];
-        case ARM_CPU_MODE_FIQ:
-            return env->fiq_regs[regno - 8];
-        default:
-            g_assert_not_reached();
+            case ARM_CPU_MODE_USR:
+                return env->usr_regs[regno - 8];
+            case ARM_CPU_MODE_FIQ:
+                return env->fiq_regs[regno - 8];
+            default:
+                g_assert_not_reached();
+                // never reach here
+                return 0;
         }
-    default:
-        g_assert_not_reached();
+    } else {
+        switch (regno) {
+            case 16: /* SPSRs */
+                return env->banked_spsr[bank_number(tgtmode)];
+            case 17: /* ELR_Hyp */
+                return env->elr_el[2];
+            case 13:
+                return env->banked_r13[bank_number(tgtmode)];
+            case 14:
+                return env->banked_r14[r14_bank_number(tgtmode)];
+            default:
+                g_assert_not_reached();
+                // never reach here
+                return 0;
+        }
     }
 }
 
@@ -610,7 +614,7 @@ void HELPER(access_check_cp_reg)(CPUARMState *env, void *rip, uint32_t syndrome,
                                  uint32_t isread)
 {
     const ARMCPRegInfo *ri = rip;
-    int target_el;
+    int target_el = 0;
 
     if (arm_feature(env, ARM_FEATURE_XSCALE) && ri->cp < 14
         && extract32(env->cp15.c15_cpar, ri->cp, 1) == 0) {
@@ -685,6 +689,7 @@ void HELPER(access_check_cp_reg)(CPUARMState *env, void *rip, uint32_t syndrome,
         break;
     default:
         g_assert_not_reached();
+        break;
     }
 
 exept:
@@ -696,9 +701,7 @@ void HELPER(set_cp_reg)(CPUARMState *env, void *rip, uint32_t value)
     const ARMCPRegInfo *ri = rip;
 
     if (ri->type & ARM_CP_IO) {
-        qemu_mutex_lock_iothread();
         ri->writefn(env, ri, value);
-        qemu_mutex_unlock_iothread();
     } else {
         ri->writefn(env, ri, value);
     }
@@ -710,9 +713,7 @@ uint32_t HELPER(get_cp_reg)(CPUARMState *env, void *rip)
     uint32_t res;
 
     if (ri->type & ARM_CP_IO) {
-        qemu_mutex_lock_iothread();
         res = ri->readfn(env, ri);
-        qemu_mutex_unlock_iothread();
     } else {
         res = ri->readfn(env, ri);
     }
@@ -725,9 +726,7 @@ void HELPER(set_cp_reg64)(CPUARMState *env, void *rip, uint64_t value)
     const ARMCPRegInfo *ri = rip;
 
     if (ri->type & ARM_CP_IO) {
-        qemu_mutex_lock_iothread();
         ri->writefn(env, ri, value);
-        qemu_mutex_unlock_iothread();
     } else {
         ri->writefn(env, ri, value);
     }
@@ -739,9 +738,7 @@ uint64_t HELPER(get_cp_reg64)(CPUARMState *env, void *rip)
     uint64_t res;
 
     if (ri->type & ARM_CP_IO) {
-        qemu_mutex_lock_iothread();
         res = ri->readfn(env, ri);
-        qemu_mutex_unlock_iothread();
     } else {
         res = ri->readfn(env, ri);
     }
@@ -934,4 +931,39 @@ uint32_t HELPER(ror_cc)(CPUARMState *env, uint32_t x, uint32_t i)
         env->CF = (x >> (shift - 1)) & 1;
         return ((uint32_t)x >> shift) | (x << (32 - shift));
     }
+}
+
+uint32_t HELPER(uc_hooksys64)(CPUARMState *env, uint32_t insn, void *hk)
+{
+    uc_arm64_reg uc_rt;
+    struct hook *hook = (struct hook*)hk;
+    uc_arm64_cp_reg cp_reg;
+    uint32_t rt;
+
+    if (hook->to_delete) {
+        return 0;
+    }
+
+    rt = extract32(insn, 0, 5);
+    cp_reg.op0 = extract32(insn, 19, 2);
+    cp_reg.op1 = extract32(insn, 16, 3);
+    cp_reg.crn = extract32(insn, 12, 4);
+    cp_reg.crm = extract32(insn, 8, 4);
+    cp_reg.op2 = extract32(insn, 5, 3);
+
+    if (rt <= 28 && rt >= 0) {
+        uc_rt = UC_ARM64_REG_X0 + rt;
+        cp_reg.val = env->xregs[rt];
+    } else if (rt == 29 ) {
+        uc_rt = UC_ARM64_REG_X29;
+        cp_reg.val = env->xregs[29];
+    } else if (rt == 30) {
+        uc_rt = UC_ARM64_REG_X30;
+        cp_reg.val = env->xregs[30];
+    } else {
+        uc_rt = UC_ARM64_REG_XZR;
+        cp_reg.val = 0;
+    }
+
+    return ((uc_cb_insn_sys_t)(hook->callback))(env->uc, uc_rt, &cp_reg, hook->user_data);
 }

@@ -27,6 +27,7 @@
 #define HOST_UTILS_H
 
 #include "qemu/bswap.h"
+#include "qemu/int128.h"
 
 #ifdef CONFIG_INT128
 static inline void mulu64(uint64_t *plow, uint64_t *phigh,
@@ -48,7 +49,29 @@ static inline void muls64(uint64_t *plow, uint64_t *phigh,
 /* compute with 96 bit intermediate result: (a*b)/c */
 static inline uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c)
 {
-    return (__int128_t)a * b / c;
+    #if defined(_MSC_VER) && defined(__clang__)
+        union {
+            uint64_t ll;
+            struct {
+    #ifdef HOST_WORDS_BIGENDIAN
+                uint32_t high, low;
+    #else
+                uint32_t low, high;
+    #endif
+            } l;
+        } u, res;
+        uint64_t rl, rh;
+
+        u.ll = a;
+        rl = (uint64_t)u.l.low * (uint64_t)b;
+        rh = (uint64_t)u.l.high * (uint64_t)b;
+        rh += (rl >> 32);
+        res.l.high = rh / c;
+        res.l.low = (((rh % c) << 32) + (rl & 0xffffffff)) / c;
+        return res.ll;
+    #else
+        return (__int128_t)a * b / c;
+    #endif
 }
 
 static inline int divu128(uint64_t *plow, uint64_t *phigh, uint64_t divisor)
@@ -115,7 +138,37 @@ static inline uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c)
  */
 static inline int clz32(uint32_t val)
 {
+#ifndef _MSC_VER
     return val ? __builtin_clz(val) : 32;
+#else
+    /* Binary search for the leading one bit.  */
+    int cnt = 0;
+
+    if (!(val & 0xFFFF0000U)) {
+        cnt += 16;
+        val <<= 16;
+    }
+    if (!(val & 0xFF000000U)) {
+        cnt += 8;
+        val <<= 8;
+    }
+    if (!(val & 0xF0000000U)) {
+        cnt += 4;
+        val <<= 4;
+    }
+    if (!(val & 0xC0000000U)) {
+        cnt += 2;
+        val <<= 2;
+    }
+    if (!(val & 0x80000000U)) {
+        cnt++;
+        val <<= 1;
+    }
+    if (!(val & 0x80000000U)) {
+        cnt++;
+    }
+    return cnt;
+#endif
 }
 
 /**
@@ -138,7 +191,19 @@ static inline int clo32(uint32_t val)
  */
 static inline int clz64(uint64_t val)
 {
+#ifndef _MSC_VER
     return val ? __builtin_clzll(val) : 64;
+#else
+    int cnt = 0;
+
+    if (!(val >> 32)) {
+        cnt += 32;
+    } else {
+        val >>= 32;
+    }
+
+    return cnt + clz32((uint32_t)val);
+#endif
 }
 
 /**
@@ -161,7 +226,39 @@ static inline int clo64(uint64_t val)
  */
 static inline int ctz32(uint32_t val)
 {
+#ifndef _MSC_VER
     return val ? __builtin_ctz(val) : 32;
+#else
+    /* Binary search for the trailing one bit.  */
+    int cnt;
+
+    cnt = 0;
+    if (!(val & 0x0000FFFFUL)) {
+        cnt += 16;
+        val >>= 16;
+    }
+    if (!(val & 0x000000FFUL)) {
+        cnt += 8;
+        val >>= 8;
+    }
+    if (!(val & 0x0000000FUL)) {
+        cnt += 4;
+        val >>= 4;
+    }
+    if (!(val & 0x00000003UL)) {
+        cnt += 2;
+        val >>= 2;
+    }
+    if (!(val & 0x00000001UL)) {
+        cnt++;
+        val >>= 1;
+    }
+    if (!(val & 0x00000001UL)) {
+        cnt++;
+    }
+
+    return cnt;
+#endif
 }
 
 /**
@@ -184,7 +281,19 @@ static inline int cto32(uint32_t val)
  */
 static inline int ctz64(uint64_t val)
 {
+#ifndef _MSC_VER
     return val ? __builtin_ctzll(val) : 64;
+#else
+    int cnt;
+
+    cnt = 0;
+    if (!((uint32_t)val)) {
+        cnt += 32;
+        val >>= 32;
+    }
+
+    return cnt + ctz32((uint32_t)val);
+#endif
 }
 
 /**
@@ -207,7 +316,7 @@ static inline int cto64(uint64_t val)
  */
 static inline int clrsb32(uint32_t val)
 {
-#if __has_builtin(__builtin_clrsb) || !defined(__clang__)
+#if !defined(_MSC_VER) && !defined(__clang__)
     return __builtin_clrsb(val);
 #else
     return clz32(val ^ ((int32_t)val >> 1)) - 1;
@@ -223,7 +332,7 @@ static inline int clrsb32(uint32_t val)
  */
 static inline int clrsb64(uint64_t val)
 {
-#if __has_builtin(__builtin_clrsbll) || !defined(__clang__)
+#if !defined(_MSC_VER) && !defined(__clang__)
     return __builtin_clrsbll(val);
 #else
     return clz64(val ^ ((int64_t)val >> 1)) - 1;
@@ -236,7 +345,15 @@ static inline int clrsb64(uint64_t val)
  */
 static inline int ctpop8(uint8_t val)
 {
+#ifndef _MSC_VER
     return __builtin_popcount(val);
+#else
+    val = (val & 0x55) + ((val >> 1) & 0x55);
+    val = (val & 0x33) + ((val >> 2) & 0x33);
+    val = (val & 0x0f) + ((val >> 4) & 0x0f);
+
+    return val;
+#endif
 }
 
 /**
@@ -245,7 +362,16 @@ static inline int ctpop8(uint8_t val)
  */
 static inline int ctpop16(uint16_t val)
 {
+#ifndef _MSC_VER
     return __builtin_popcount(val);
+#else
+    val = (val & 0x5555) + ((val >> 1) & 0x5555);
+    val = (val & 0x3333) + ((val >> 2) & 0x3333);
+    val = (val & 0x0f0f) + ((val >> 4) & 0x0f0f);
+    val = (val & 0x00ff) + ((val >> 8) & 0x00ff);
+
+    return val;
+#endif
 }
 
 /**
@@ -254,7 +380,17 @@ static inline int ctpop16(uint16_t val)
  */
 static inline int ctpop32(uint32_t val)
 {
+#ifndef _MSC_VER
     return __builtin_popcount(val);
+#else
+    val = (val & 0x55555555) + ((val >>  1) & 0x55555555);
+    val = (val & 0x33333333) + ((val >>  2) & 0x33333333);
+    val = (val & 0x0f0f0f0f) + ((val >>  4) & 0x0f0f0f0f);
+    val = (val & 0x00ff00ff) + ((val >>  8) & 0x00ff00ff);
+    val = (val & 0x0000ffff) + ((val >> 16) & 0x0000ffff);
+
+    return val;
+#endif
 }
 
 /**
@@ -263,7 +399,18 @@ static inline int ctpop32(uint32_t val)
  */
 static inline int ctpop64(uint64_t val)
 {
+#ifndef _MSC_VER
     return __builtin_popcountll(val);
+#else
+    val = (val & 0x5555555555555555ULL) + ((val >>  1) & 0x5555555555555555ULL);
+    val = (val & 0x3333333333333333ULL) + ((val >>  2) & 0x3333333333333333ULL);
+    val = (val & 0x0f0f0f0f0f0f0f0fULL) + ((val >>  4) & 0x0f0f0f0f0f0f0f0fULL);
+    val = (val & 0x00ff00ff00ff00ffULL) + ((val >>  8) & 0x00ff00ff00ff00ffULL);
+    val = (val & 0x0000ffff0000ffffULL) + ((val >> 16) & 0x0000ffff0000ffffULL);
+    val = (val & 0x00000000ffffffffULL) + ((val >> 32) & 0x00000000ffffffffULL);
+
+    return (int)val;
+#endif
 }
 
 /**

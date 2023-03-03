@@ -40,7 +40,7 @@
 
 static void clear_tail(void *vd, uintptr_t opr_sz, uintptr_t max_sz)
 {
-    uint64_t *d = vd + opr_sz;
+    uint64_t *d = (uint64_t *)((char *)vd + opr_sz);
     uintptr_t i;
 
     for (i = opr_sz; i < max_sz; i += 8) {
@@ -1190,7 +1190,11 @@ void HELPER(gvec_pmull_q)(void *vd, void *vn, void *vm, uint32_t desc)
         }
 
         for (j = 1; j < 64; ++j) {
+#ifdef _MSC_VER
+            uint64_t mask = 0 - ((nn >> j) & 1);
+#else
             uint64_t mask = -((nn >> j) & 1);
+#endif
             rlo ^= (mm << j) & mask;
             rhi ^= (mm >> (64 - j)) & mask;
         }

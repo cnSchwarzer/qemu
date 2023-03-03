@@ -25,12 +25,8 @@
 
 #include "qemu/host-utils.h"
 #include "qemu/thread.h"
-#ifdef CONFIG_TCG
 #include "tcg-target.h"
-#endif
-#ifndef CONFIG_USER_ONLY
 #include "exec/hwaddr.h"
-#endif
 #include "exec/memattrs.h"
 #include "hw/core/cpu.h"
 
@@ -76,8 +72,6 @@ typedef uint64_t target_ulong;
 #else
 #error TARGET_LONG_SIZE undefined
 #endif
-
-#if !defined(CONFIG_USER_ONLY) && defined(CONFIG_TCG)
 
 /* use a fully associative victim tlb of 8 entries */
 #define CPU_VTLB_SIZE 8
@@ -190,8 +184,6 @@ typedef struct CPUTLBDescFast {
  * Data elements that are shared between all MMU modes.
  */
 typedef struct CPUTLBCommon {
-    /* Serialize updates to f.table and d.vtable, and others as noted. */
-    QemuSpin lock;
     /*
      * Within dirty, for each bit N, modifications have been made to
      * mmu_idx N since the last time that mmu_idx was flushed.
@@ -224,12 +216,6 @@ typedef struct CPUTLB {
 /* This will be used by TCG backends to compute offsets.  */
 #define TLB_MASK_TABLE_OFS(IDX) \
     ((int)offsetof(ArchCPU, neg.tlb.f[IDX]) - (int)offsetof(ArchCPU, env))
-
-#else
-
-typedef struct CPUTLB { } CPUTLB;
-
-#endif  /* !CONFIG_USER_ONLY && CONFIG_TCG */
 
 /*
  * This structure must be placed in ArchCPU immediately

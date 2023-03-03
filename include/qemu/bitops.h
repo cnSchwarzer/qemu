@@ -42,19 +42,6 @@ static inline void set_bit(long nr, unsigned long *addr)
 }
 
 /**
- * set_bit_atomic - Set a bit in memory atomically
- * @nr: the bit to set
- * @addr: the address to start counting from
- */
-static inline void set_bit_atomic(long nr, unsigned long *addr)
-{
-    unsigned long mask = BIT_MASK(nr);
-    unsigned long *p = addr + BIT_WORD(nr);
-
-    atomic_or(p, mask);
-}
-
-/**
  * clear_bit - Clears a bit in memory
  * @nr: Bit to clear
  * @addr: Address to start counting from

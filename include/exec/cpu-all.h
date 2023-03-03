@@ -23,7 +23,12 @@
 #include "exec/memory.h"
 #include "qemu/thread.h"
 #include "hw/core/cpu.h"
+
+#include <uc_priv.h>
+
+#if 0
 #include "qemu/rcu.h"
+#endif
 
 #define EXCP_INTERRUPT 	0x10000 /* async interruption */
 #define EXCP_HLT        0x10001 /* hlt instruction reached */
@@ -151,34 +156,23 @@ static inline void tswap64s(uint64_t *s)
 #endif
 
 /* MMU memory access macros */
-
-#if defined(CONFIG_USER_ONLY)
-#include "exec/user/abitypes.h"
-
-/* On some host systems the guest address space is reserved on the host.
- * This allows the guest address space to be offset to a convenient location.
- */
-extern unsigned long guest_base;
-extern int have_guest_base;
-extern unsigned long reserved_va;
-
-#if HOST_LONG_BITS <= TARGET_VIRT_ADDR_SPACE_BITS
-#define GUEST_ADDR_MAX (~0ul)
-#else
-#define GUEST_ADDR_MAX (reserved_va ? reserved_va - 1 : \
-                                    (1ul << TARGET_VIRT_ADDR_SPACE_BITS) - 1)
-#endif
-#else
-
 #include "exec/hwaddr.h"
 
+#ifdef UNICORN_ARCH_POSTFIX
+#define SUFFIX       UNICORN_ARCH_POSTFIX
+#else
 #define SUFFIX
+#endif
 #define ARG1         as
 #define ARG1_DECL    AddressSpace *as
 #define TARGET_ENDIANNESS
 #include "exec/memory_ldst.inc.h"
 
+#ifdef UNICORN_ARCH_POSTFIX
+#define SUFFIX       glue(_cached_slow, UNICORN_ARCH_POSTFIX)
+#else
 #define SUFFIX       _cached_slow
+#endif
 #define ARG1         cache
 #define ARG1_DECL    MemoryRegionCache *cache
 #define TARGET_ENDIANNESS
@@ -186,11 +180,20 @@ extern unsigned long reserved_va;
 
 static inline void stl_phys_notdirty(AddressSpace *as, hwaddr addr, uint32_t val)
 {
-    address_space_stl_notdirty(as, addr, val,
+#ifdef UNICORN_ARCH_POSTFIX
+    glue(address_space_stl_notdirty, UNICORN_ARCH_POSTFIX)
+        (as->uc, as, addr, val, MEMTXATTRS_UNSPECIFIED, NULL);
+#else
+    address_space_stl_notdirty(as->uc, as, addr, val,
                                MEMTXATTRS_UNSPECIFIED, NULL);
+#endif
 }
 
+#ifdef UNICORN_ARCH_POSTFIX
+#define SUFFIX       UNICORN_ARCH_POSTFIX
+#else
 #define SUFFIX
+#endif
 #define ARG1         as
 #define ARG1_DECL    AddressSpace *as
 #define TARGET_ENDIANNESS
@@ -200,17 +203,20 @@ static inline void stl_phys_notdirty(AddressSpace *as, hwaddr addr, uint32_t val
 #define ENDIANNESS
 #include "exec/memory_ldst_cached.inc.h"
 
+#ifdef UNICORN_ARCH_POSTFIX
+#define SUFFIX       glue(_cached, UNICORN_ARCH_POSTFIX)
+#else
 #define SUFFIX       _cached
+#endif
 #define ARG1         cache
 #define ARG1_DECL    MemoryRegionCache *cache
 #define TARGET_ENDIANNESS
 #include "exec/memory_ldst_phys.inc.h"
-#endif
 
 /* page related stuff */
 
 #ifdef TARGET_PAGE_BITS_VARY
-typedef struct {
+typedef struct TargetPageBits {
     bool decided;
     int bits;
     target_long mask;
@@ -220,30 +226,27 @@ extern const TargetPageBits target_page;
 #else
 extern TargetPageBits target_page;
 #endif
+
 #ifdef CONFIG_DEBUG_TCG
 #define TARGET_PAGE_BITS   ({ assert(target_page.decided); target_page.bits; })
 #define TARGET_PAGE_MASK   ({ assert(target_page.decided); target_page.mask; })
 #else
-#define TARGET_PAGE_BITS   target_page.bits
-#define TARGET_PAGE_MASK   target_page.mask
+#define TARGET_PAGE_BITS   uc->init_target_page->bits
+#define TARGET_PAGE_MASK   uc->init_target_page->mask
 #endif
-#define TARGET_PAGE_SIZE   (-(int)TARGET_PAGE_MASK)
+#define TARGET_PAGE_SIZE   (-(int)TARGET_PAGE_MASK) // qq
 #else
 #define TARGET_PAGE_BITS_MIN TARGET_PAGE_BITS
 #define TARGET_PAGE_SIZE   (1 << TARGET_PAGE_BITS)
-#define TARGET_PAGE_MASK   ((target_long)-1 << TARGET_PAGE_BITS)
+#define TARGET_PAGE_MASK   ((target_ulong)-1 << TARGET_PAGE_BITS)
 #endif
 
 #define TARGET_PAGE_ALIGN(addr) ROUND_UP((addr), TARGET_PAGE_SIZE)
 
-/* Using intptr_t ensures that qemu_*_page_mask is sign-extended even
- * when intptr_t is 32-bit and we are aligning a long long.
- */
-extern uintptr_t qemu_host_page_size;
-extern intptr_t qemu_host_page_mask;
-
-#define HOST_PAGE_ALIGN(addr) ROUND_UP((addr), qemu_host_page_size)
-#define REAL_HOST_PAGE_ALIGN(addr) ROUND_UP((addr), qemu_real_host_page_size)
+#define HOST_PAGE_ALIGN(uc, addr) ROUND_UP((addr), uc->qemu_host_page_size)
+#if 0
+#define REAL_HOST_PAGE_ALIGN(addr) ROUND_UP((addr), uc->qemu_real_host_page_size)
+#endif
 
 /* same as PROT_xxx */
 #define PAGE_READ      0x0001
@@ -257,22 +260,6 @@ extern intptr_t qemu_host_page_mask;
 /* Invalidate the TLB entry immediately, helpful for s390x
  * Low-Address-Protection. Used with PAGE_WRITE in tlb_set_page_with_attrs() */
 #define PAGE_WRITE_INV 0x0040
-#if defined(CONFIG_BSD) && defined(CONFIG_USER_ONLY)
-/* FIXME: Code that sets/uses this is broken and needs to go away.  */
-#define PAGE_RESERVED  0x0020
-#endif
-
-#if defined(CONFIG_USER_ONLY)
-void page_dump(FILE *f);
-
-typedef int (*walk_memory_regions_fn)(void *, target_ulong,
-                                      target_ulong, unsigned long);
-int walk_memory_regions(void *, walk_memory_regions_fn);
-
-int page_get_flags(target_ulong address);
-void page_set_flags(target_ulong start, target_ulong end, int flags);
-int page_check_range(target_ulong start, target_ulong len, int flags);
-#endif
 
 CPUArchState *cpu_copy(CPUArchState *env);
 
@@ -328,8 +315,6 @@ CPUArchState *cpu_copy(CPUArchState *env);
      | CPU_INTERRUPT_TGT_EXT_3   \
      | CPU_INTERRUPT_TGT_EXT_4)
 
-#if !defined(CONFIG_USER_ONLY)
-
 /*
  * Flags stored in the low bits of the TLB virtual address.
  * These are defined so that fast path ram access is all zeros.
@@ -367,7 +352,7 @@ CPUArchState *cpu_copy(CPUArchState *env);
  * @addr: virtual address to test (must be page aligned)
  * @tlb_addr: TLB entry address (a CPUTLBEntry addr_read/write/code value)
  */
-static inline bool tlb_hit_page(target_ulong tlb_addr, target_ulong addr)
+static inline bool tlb_hit_page(struct uc_struct *uc, target_ulong tlb_addr, target_ulong addr)
 {
     return addr == (tlb_addr & (TARGET_PAGE_MASK | TLB_INVALID_MASK));
 }
@@ -378,19 +363,15 @@ static inline bool tlb_hit_page(target_ulong tlb_addr, target_ulong addr)
  * @addr: virtual address to test (need not be page aligned)
  * @tlb_addr: TLB entry address (a CPUTLBEntry addr_read/write/code value)
  */
-static inline bool tlb_hit(target_ulong tlb_addr, target_ulong addr)
+static inline bool tlb_hit(struct uc_struct *uc, target_ulong tlb_addr, target_ulong addr)
 {
-    return tlb_hit_page(tlb_addr, addr & TARGET_PAGE_MASK);
+    return tlb_hit_page(uc, tlb_addr, addr & TARGET_PAGE_MASK);
 }
-
-void dump_exec_info(void);
-void dump_opcount_info(void);
-#endif /* !CONFIG_USER_ONLY */
 
 int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,
                         void *ptr, target_ulong len, bool is_write);
 
-int cpu_exec(CPUState *cpu);
+int cpu_exec(struct uc_struct *uc, CPUState *cpu);
 
 /**
  * cpu_set_cpustate_pointers(cpu)

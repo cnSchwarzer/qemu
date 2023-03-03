@@ -16,6 +16,8 @@
 #include "cpu_features.h"
 #include "gen-features.h"
 #include "hw/core/cpu.h"
+#include "unicorn/s390x.h"
+#include "uc_priv.h"
 
 /* static CPU definition */
 struct S390CPUDef {
@@ -89,8 +91,8 @@ static inline uint16_t s390_ibc_from_cpu_model(const S390CPUModel *model)
     }
     return ibc;
 }
-void s390_get_feat_block(S390FeatType type, uint8_t *data);
-bool s390_has_feat(S390Feat feat);
+void s390_get_feat_block(struct uc_struct *uc, S390FeatType type, uint8_t *data);
+bool s390_has_feat(struct uc_struct *uc, S390Feat feat);
 uint8_t s390_get_gen_for_cpu_type(uint16_t type);
 static inline bool s390_known_cpu_type(uint16_t type)
 {
@@ -106,23 +108,8 @@ static inline uint64_t s390_cpuid_from_cpu_model(const S390CPUModel *model)
 S390CPUDef const *s390_find_cpu_def(uint16_t type, uint8_t gen, uint8_t ec_ga,
                                     S390FeatBitmap features);
 
-#ifdef CONFIG_KVM
-bool kvm_s390_cpu_models_supported(void);
-void kvm_s390_get_host_cpu_model(S390CPUModel *model, Error **errp);
-void kvm_s390_apply_cpu_model(const S390CPUModel *model,  Error **errp);
-#else
-static inline void kvm_s390_get_host_cpu_model(S390CPUModel *model,
-                                               Error **errp)
-{
-}
-static inline void kvm_s390_apply_cpu_model(const S390CPUModel *model,
-                                            Error **errp)
-{
-}
-static inline bool kvm_s390_cpu_models_supported(void)
-{
-    return false;
-}
-#endif
+void s390_init_cpu_model(uc_engine *uc, uc_cpu_s390x cpu_model);
+
+void s390_cpu_model_finalize(CPUState *obj);
 
 #endif /* TARGET_S390X_CPU_MODELS_H */

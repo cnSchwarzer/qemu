@@ -55,7 +55,12 @@ bool ppc64_v3_get_pate(PowerPCCPU *cpu, target_ulong lpid, ppc_v3_pate_t *entry)
 
     /* Grab entry */
     patb += 16 * lpid;
-    entry->dw0 = ldq_phys(CPU(cpu)->as, patb);
-    entry->dw1 = ldq_phys(CPU(cpu)->as, patb + 8);
+#ifdef UNICORN_ARCH_POSTFIX
+    entry->dw0 = glue(ldq_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, patb);
+    entry->dw1 = glue(ldq_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, patb + 8);
+#else
+    entry->dw0 = ldq_phys(cpu->env.uc, CPU(cpu)->as, patb);
+    entry->dw1 = ldq_phys(cpu->env.uc, CPU(cpu)->as, patb + 8);
+#endif
     return true;
 }

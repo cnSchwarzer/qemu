@@ -1885,6 +1885,9 @@ static TCGReg tcg_out_tlb_read(TCGContext *s, MemOp opc,
                                TCGReg addrlo, TCGReg addrhi,
                                int mem_index, bool is_read)
 {
+#ifdef TARGET_ARM
+    struct uc_struct *uc = s->uc;
+#endif
     int cmp_off
         = (is_read
            ? offsetof(CPUTLBEntry, addr_read)
@@ -2975,7 +2978,7 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc, const TCGArg *args,
     }
 }
 
-int tcg_can_emit_vec_op(TCGOpcode opc, TCGType type, unsigned vece)
+int tcg_can_emit_vec_op(TCGContext *tcg_ctx, TCGOpcode opc, TCGType type, unsigned vece)
 {
     switch (opc) {
     case INDEX_op_and_vec:
@@ -3320,19 +3323,19 @@ static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
     tcg_out32(s, insn | VRT(a0) | VRA(a1) | VRB(a2));
 }
 
-static void expand_vec_shi(TCGType type, unsigned vece, TCGv_vec v0,
+static void expand_vec_shi(TCGContext *tcg_ctx, TCGType type, unsigned vece, TCGv_vec v0,
                            TCGv_vec v1, TCGArg imm, TCGOpcode opci)
 {
-    TCGv_vec t1 = tcg_temp_new_vec(type);
+    TCGv_vec t1 = tcg_temp_new_vec(tcg_ctx, type);
 
     /* Splat w/bytes for xxspltib.  */
-    tcg_gen_dupi_vec(MO_8, t1, imm & ((8 << vece) - 1));
-    vec_gen_3(opci, type, vece, tcgv_vec_arg(v0),
-              tcgv_vec_arg(v1), tcgv_vec_arg(t1));
-    tcg_temp_free_vec(t1);
+    tcg_gen_dupi_vec(tcg_ctx, MO_8, t1, imm & ((8 << vece) - 1));
+    vec_gen_3(tcg_ctx, opci, type, vece, tcgv_vec_arg(tcg_ctx, v0),
+              tcgv_vec_arg(tcg_ctx, v1), tcgv_vec_arg(tcg_ctx, t1));
+    tcg_temp_free_vec(tcg_ctx, t1);
 }
 
-static void expand_vec_cmp(TCGType type, unsigned vece, TCGv_vec v0,
+static void expand_vec_cmp(TCGContext *tcg_ctx, TCGType type, unsigned vece, TCGv_vec v0,
                            TCGv_vec v1, TCGv_vec v2, TCGCond cond)
 {
     bool need_swap = false, need_inv = false;
@@ -3374,63 +3377,63 @@ static void expand_vec_cmp(TCGType type, unsigned vece, TCGv_vec v0,
         cond = tcg_swap_cond(cond);
     }
 
-    vec_gen_4(INDEX_op_cmp_vec, type, vece, tcgv_vec_arg(v0),
-              tcgv_vec_arg(v1), tcgv_vec_arg(v2), cond);
+    vec_gen_4(tcg_ctx, INDEX_op_cmp_vec, type, vece, tcgv_vec_arg(tcg_ctx, v0),
+              tcgv_vec_arg(tcg_ctx, v1), tcgv_vec_arg(tcg_ctx, v2), cond);
 
     if (need_inv) {
-        tcg_gen_not_vec(vece, v0, v0);
+        tcg_gen_not_vec(tcg_ctx, vece, v0, v0);
     }
 }
 
-static void expand_vec_mul(TCGType type, unsigned vece, TCGv_vec v0,
+static void expand_vec_mul(TCGContext *tcg_ctx, TCGType type, unsigned vece, TCGv_vec v0,
                            TCGv_vec v1, TCGv_vec v2)
 {
-    TCGv_vec t1 = tcg_temp_new_vec(type);
-    TCGv_vec t2 = tcg_temp_new_vec(type);
+    TCGv_vec t1 = tcg_temp_new_vec(tcg_ctx, type);
+    TCGv_vec t2 = tcg_temp_new_vec(tcg_ctx, type);
     TCGv_vec t3, t4;
 
     switch (vece) {
     case MO_8:
     case MO_16:
-        vec_gen_3(INDEX_op_ppc_muleu_vec, type, vece, tcgv_vec_arg(t1),
-                  tcgv_vec_arg(v1), tcgv_vec_arg(v2));
-        vec_gen_3(INDEX_op_ppc_mulou_vec, type, vece, tcgv_vec_arg(t2),
-                  tcgv_vec_arg(v1), tcgv_vec_arg(v2));
-        vec_gen_3(INDEX_op_ppc_mrgh_vec, type, vece + 1, tcgv_vec_arg(v0),
-                  tcgv_vec_arg(t1), tcgv_vec_arg(t2));
-        vec_gen_3(INDEX_op_ppc_mrgl_vec, type, vece + 1, tcgv_vec_arg(t1),
-                  tcgv_vec_arg(t1), tcgv_vec_arg(t2));
-        vec_gen_3(INDEX_op_ppc_pkum_vec, type, vece, tcgv_vec_arg(v0),
-                  tcgv_vec_arg(v0), tcgv_vec_arg(t1));
+        vec_gen_3(tcg_ctx, INDEX_op_ppc_muleu_vec, type, vece, tcgv_vec_arg(tcg_ctx, t1),
+                  tcgv_vec_arg(tcg_ctx, v1), tcgv_vec_arg(tcg_ctx, v2));
+        vec_gen_3(tcg_ctx, INDEX_op_ppc_mulou_vec, type, vece, tcgv_vec_arg(tcg_ctx, t2),
+                  tcgv_vec_arg(tcg_ctx, v1), tcgv_vec_arg(tcg_ctx, v2));
+        vec_gen_3(tcg_ctx, INDEX_op_ppc_mrgh_vec, type, vece + 1, tcgv_vec_arg(tcg_ctx, v0),
+                  tcgv_vec_arg(tcg_ctx, t1), tcgv_vec_arg(tcg_ctx, t2));
+        vec_gen_3(tcg_ctx, INDEX_op_ppc_mrgl_vec, type, vece + 1, tcgv_vec_arg(tcg_ctx, t1),
+                  tcgv_vec_arg(tcg_ctx, t1), tcgv_vec_arg(tcg_ctx, t2));
+        vec_gen_3(tcg_ctx, INDEX_op_ppc_pkum_vec, type, vece, tcgv_vec_arg(tcg_ctx, v0),
+                  tcgv_vec_arg(tcg_ctx, v0), tcgv_vec_arg(tcg_ctx, t1));
 	break;
 
     case MO_32:
         tcg_debug_assert(!have_isa_2_07);
-        t3 = tcg_temp_new_vec(type);
-        t4 = tcg_temp_new_vec(type);
-        tcg_gen_dupi_vec(MO_8, t4, -16);
-        vec_gen_3(INDEX_op_ppc_rotl_vec, type, MO_32, tcgv_vec_arg(t1),
-                  tcgv_vec_arg(v2), tcgv_vec_arg(t4));
-        vec_gen_3(INDEX_op_ppc_mulou_vec, type, MO_16, tcgv_vec_arg(t2),
-                  tcgv_vec_arg(v1), tcgv_vec_arg(v2));
-        tcg_gen_dupi_vec(MO_8, t3, 0);
-        vec_gen_4(INDEX_op_ppc_msum_vec, type, MO_16, tcgv_vec_arg(t3),
-                  tcgv_vec_arg(v1), tcgv_vec_arg(t1), tcgv_vec_arg(t3));
-        vec_gen_3(INDEX_op_shlv_vec, type, MO_32, tcgv_vec_arg(t3),
-                  tcgv_vec_arg(t3), tcgv_vec_arg(t4));
-        tcg_gen_add_vec(MO_32, v0, t2, t3);
-        tcg_temp_free_vec(t3);
-        tcg_temp_free_vec(t4);
+        t3 = tcg_temp_new_vec(tcg_ctx, type);
+        t4 = tcg_temp_new_vec(tcg_ctx, type);
+        tcg_gen_dupi_vec(tcg_ctx, MO_8, t4, -16);
+        vec_gen_3(tcg_ctx, INDEX_op_ppc_rotl_vec, type, MO_32, tcgv_vec_arg(tcg_ctx, t1),
+                  tcgv_vec_arg(tcg_ctx, v2), tcgv_vec_arg(tcg_ctx, t4));
+        vec_gen_3(tcg_ctx, INDEX_op_ppc_mulou_vec, type, MO_16, tcgv_vec_arg(tcg_ctx, t2),
+                  tcgv_vec_arg(tcg_ctx, v1), tcgv_vec_arg(tcg_ctx, v2));
+        tcg_gen_dupi_vec(tcg_ctx, MO_8, t3, 0);
+        vec_gen_4(tcg_ctx, INDEX_op_ppc_msum_vec, type, MO_16, tcgv_vec_arg(tcg_ctx, t3),
+                  tcgv_vec_arg(tcg_ctx, v1), tcgv_vec_arg(tcg_ctx, t1), tcgv_vec_arg(tcg_ctx, t3));
+        vec_gen_3(tcg_ctx, INDEX_op_shlv_vec, type, MO_32, tcgv_vec_arg(tcg_ctx, t3),
+                  tcgv_vec_arg(tcg_ctx, t3), tcgv_vec_arg(tcg_ctx, t4));
+        tcg_gen_add_vec(tcg_ctx, MO_32, v0, t2, t3);
+        tcg_temp_free_vec(tcg_ctx, t3);
+        tcg_temp_free_vec(tcg_ctx, t4);
         break;
 
     default:
         g_assert_not_reached();
     }
-    tcg_temp_free_vec(t1);
-    tcg_temp_free_vec(t2);
+    tcg_temp_free_vec(tcg_ctx, t1);
+    tcg_temp_free_vec(tcg_ctx, t2);
 }
 
-void tcg_expand_vec_op(TCGOpcode opc, TCGType type, unsigned vece,
+void tcg_expand_vec_op(TCGContext *tcg_ctx, TCGOpcode opc, TCGType type, unsigned vece,
                        TCGArg a0, ...)
 {
     va_list va;
@@ -3438,27 +3441,27 @@ void tcg_expand_vec_op(TCGOpcode opc, TCGType type, unsigned vece,
     TCGArg a2;
 
     va_start(va, a0);
-    v0 = temp_tcgv_vec(arg_temp(a0));
-    v1 = temp_tcgv_vec(arg_temp(va_arg(va, TCGArg)));
+    v0 = temp_tcgv_vec(tcg_ctx, arg_temp(a0));
+    v1 = temp_tcgv_vec(tcg_ctx, arg_temp(va_arg(va, TCGArg)));
     a2 = va_arg(va, TCGArg);
 
     switch (opc) {
     case INDEX_op_shli_vec:
-        expand_vec_shi(type, vece, v0, v1, a2, INDEX_op_shlv_vec);
+        expand_vec_shi(tcg_ctx, type, vece, v0, v1, a2, INDEX_op_shlv_vec);
         break;
     case INDEX_op_shri_vec:
-        expand_vec_shi(type, vece, v0, v1, a2, INDEX_op_shrv_vec);
+        expand_vec_shi(tcg_ctx, type, vece, v0, v1, a2, INDEX_op_shrv_vec);
         break;
     case INDEX_op_sari_vec:
-        expand_vec_shi(type, vece, v0, v1, a2, INDEX_op_sarv_vec);
+        expand_vec_shi(tcg_ctx, type, vece, v0, v1, a2, INDEX_op_sarv_vec);
         break;
     case INDEX_op_cmp_vec:
-        v2 = temp_tcgv_vec(arg_temp(a2));
-        expand_vec_cmp(type, vece, v0, v1, v2, va_arg(va, TCGArg));
+        v2 = temp_tcgv_vec(tcg_ctx, arg_temp(a2));
+        expand_vec_cmp(tcg_ctx, type, vece, v0, v1, v2, va_arg(va, TCGArg));
         break;
     case INDEX_op_mul_vec:
-        v2 = temp_tcgv_vec(arg_temp(a2));
-        expand_vec_mul(type, vece, v0, v1, v2);
+        v2 = temp_tcgv_vec(tcg_ctx, arg_temp(a2));
+        expand_vec_mul(tcg_ctx, type, vece, v0, v1, v2);
         break;
     default:
         g_assert_not_reached();
@@ -3690,10 +3693,16 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
     }
 }
 
+static size_t dsize = 0;
+static size_t isize = 0;
+
 static void tcg_target_init(TCGContext *s)
 {
     unsigned long hwcap = qemu_getauxval(AT_HWCAP);
     unsigned long hwcap2 = qemu_getauxval(AT_HWCAP2);
+
+    dsize = qemu_getauxval(AT_ICACHEBSIZE);
+    isize = qemu_getauxval(AT_DCACHEBSIZE);
 
     have_isa = tcg_isa_base;
     if (hwcap & PPC_FEATURE_ARCH_2_06) {
@@ -3726,47 +3735,47 @@ static void tcg_target_init(TCGContext *s)
         }
     }
 
-    tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffff;
-    tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffff;
+    s->tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffff;
+    s->tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffff;
     if (have_altivec) {
-        tcg_target_available_regs[TCG_TYPE_V64] = 0xffffffff00000000ull;
-        tcg_target_available_regs[TCG_TYPE_V128] = 0xffffffff00000000ull;
+        s->tcg_target_available_regs[TCG_TYPE_V64] = 0xffffffff00000000ull;
+        s->tcg_target_available_regs[TCG_TYPE_V128] = 0xffffffff00000000ull;
     }
 
-    tcg_target_call_clobber_regs = 0;
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R0);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R2);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R3);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R4);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R5);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R6);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R7);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R8);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R9);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R10);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R11);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_R12);
+    s->tcg_target_call_clobber_regs = 0;
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R0);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R2);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R3);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R4);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R5);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R6);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R7);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R8);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R9);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R10);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R11);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_R12);
 
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V0);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V1);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V2);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V3);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V4);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V5);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V6);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V7);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V8);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V9);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V10);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V11);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V12);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V13);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V14);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V15);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V16);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V17);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V18);
-    tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_V19);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V0);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V1);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V2);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V3);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V4);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V5);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V6);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V7);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V8);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V9);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V10);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V11);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V12);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V13);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V14);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V15);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V16);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V17);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V18);
+    tcg_regset_set_reg(s->tcg_target_call_clobber_regs, TCG_REG_V19);
 
     s->reserved_regs = 0;
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_R0); /* tcg temp */
@@ -3824,7 +3833,7 @@ static DebugFrame debug_frame = {
     }
 };
 
-void tcg_register_jit(void *buf, size_t buf_size)
+void tcg_register_jit(TCGContext *s, void *buf, size_t buf_size)
 {
     uint8_t *p = &debug_frame.fde_reg_ofs[3];
     int i;
@@ -3837,15 +3846,13 @@ void tcg_register_jit(void *buf, size_t buf_size)
     debug_frame.fde.func_start = (uintptr_t)buf;
     debug_frame.fde.func_len = buf_size;
 
-    tcg_register_jit_int(buf, buf_size, &debug_frame, sizeof(debug_frame));
+    tcg_register_jit_int(s, buf, buf_size, &debug_frame, sizeof(debug_frame));
 }
 #endif /* __ELF__ */
 
 void flush_icache_range(uintptr_t start, uintptr_t stop)
 {
     uintptr_t p, start1, stop1;
-    size_t dsize = qemu_dcache_linesize;
-    size_t isize = qemu_icache_linesize;
 
     start1 = start & ~(dsize - 1);
     stop1 = (stop + dsize - 1) & ~(dsize - 1);

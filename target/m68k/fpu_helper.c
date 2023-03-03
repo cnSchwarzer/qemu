@@ -357,7 +357,8 @@ static int float_comp_to_cc(int float_compare)
     case float_relation_greater:
         return 0;
     default:
-        g_assert_not_reached();
+        // g_assert_not_reached();
+        return 0;
     }
 }
 

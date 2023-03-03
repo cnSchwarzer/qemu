@@ -25,9 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
-#include "qapi/error.h"
 #include "cpu.h"
-#include "trace.h"
 
 static void pmp_write_cfg(CPURISCVState *env, uint32_t addr_index,
     uint8_t val);
@@ -238,7 +236,11 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
      * from addr to the end of the page will be accessed.
      */
     if (size == 0) {
+#ifdef _MSC_VER
+        pmp_size = 0 - (addr | TARGET_PAGE_MASK);
+#else
         pmp_size = -(addr | TARGET_PAGE_MASK);
+#endif
     } else {
         pmp_size = size;
     }
@@ -306,8 +308,6 @@ void pmpcfg_csr_write(CPURISCVState *env, uint32_t reg_index,
     int i;
     uint8_t cfg_val;
 
-    trace_pmpcfg_csr_write(env->mhartid, reg_index, val);
-
     if ((reg_index & 1) && (sizeof(target_ulong) == 8)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "ignoring pmpcfg write - incorrect address\n");
@@ -335,7 +335,6 @@ target_ulong pmpcfg_csr_read(CPURISCVState *env, uint32_t reg_index)
         val = pmp_read_cfg(env, (reg_index * sizeof(target_ulong)) + i);
         cfg_val |= (val << (i * 8));
     }
-    trace_pmpcfg_csr_read(env->mhartid, reg_index, cfg_val);
 
     return cfg_val;
 }
@@ -347,7 +346,6 @@ target_ulong pmpcfg_csr_read(CPURISCVState *env, uint32_t reg_index)
 void pmpaddr_csr_write(CPURISCVState *env, uint32_t addr_index,
     target_ulong val)
 {
-    trace_pmpaddr_csr_write(env->mhartid, addr_index, val);
     if (addr_index < MAX_RISCV_PMPS) {
         if (!pmp_is_locked(env, addr_index)) {
             env->pmp_state.pmp[addr_index].addr_reg = val;
@@ -372,7 +370,6 @@ target_ulong pmpaddr_csr_read(CPURISCVState *env, uint32_t addr_index)
 
     if (addr_index < MAX_RISCV_PMPS) {
         val = env->pmp_state.pmp[addr_index].addr_reg;
-        trace_pmpaddr_csr_read(env->mhartid, addr_index, val);
     } else {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "ignoring pmpaddr read - out of bounds\n");

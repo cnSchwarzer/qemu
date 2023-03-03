@@ -27,14 +27,18 @@ static void walk_pte(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 512; i++) {
         pte_addr = (pte_start_addr + i * 8) & a20_mask;
-        pte = address_space_ldq(as, pte_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#ifdef UNICORN_ARCH_POSTFIX
+        pte = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(as->uc, as, pte_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#else
+        pte = address_space_ldq(as->uc, as, pte_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#endif
         if (!(pte & PG_PRESENT_MASK)) {
             /* not present */
             continue;
         }
 
         start_paddr = (pte & ~0xfff) & ~(0x1ULL << 63);
-        if (cpu_physical_memory_is_io(start_paddr)) {
+        if (cpu_physical_memory_is_io(as, start_paddr)) {
             /* I/O region */
             continue;
         }
@@ -57,14 +61,18 @@ static void walk_pte2(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 1024; i++) {
         pte_addr = (pte_start_addr + i * 4) & a20_mask;
-        pte = address_space_ldl(as, pte_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#ifdef UNICORN_ARCH_POSTFIX
+        pte = glue(address_space_ldl, UNICORN_ARCH_POSTFIX)(as->uc, as, pte_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#else
+        pte = address_space_ldl(as->uc, as, pte_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#endif
         if (!(pte & PG_PRESENT_MASK)) {
             /* not present */
             continue;
         }
 
         start_paddr = pte & ~0xfff;
-        if (cpu_physical_memory_is_io(start_paddr)) {
+        if (cpu_physical_memory_is_io(as, start_paddr)) {
             /* I/O region */
             continue;
         }
@@ -89,7 +97,11 @@ static void walk_pde(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 512; i++) {
         pde_addr = (pde_start_addr + i * 8) & a20_mask;
-        pde = address_space_ldq(as, pde_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#ifdef UNICORN_ARCH_POSTFIX
+        pde = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(as->uc, as, pde_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#else
+        pde = address_space_ldq(as->uc, as, pde_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#endif
         if (!(pde & PG_PRESENT_MASK)) {
             /* not present */
             continue;
@@ -99,7 +111,7 @@ static void walk_pde(MemoryMappingList *list, AddressSpace *as,
         if (pde & PG_PSE_MASK) {
             /* 2 MB page */
             start_paddr = (pde & ~0x1fffff) & ~(0x1ULL << 63);
-            if (cpu_physical_memory_is_io(start_paddr)) {
+            if (cpu_physical_memory_is_io(as, start_paddr)) {
                 /* I/O region */
                 continue;
             }
@@ -126,7 +138,11 @@ static void walk_pde2(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 1024; i++) {
         pde_addr = (pde_start_addr + i * 4) & a20_mask;
-        pde = address_space_ldl(as, pde_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#ifdef UNICORN_ARCH_POSTFIX
+        pde = glue(address_space_ldl, UNICORN_ARCH_POSTFIX)(as->uc, as, pde_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#else
+        pde = address_space_ldl(as->uc, as, pde_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#endif
         if (!(pde & PG_PRESENT_MASK)) {
             /* not present */
             continue;
@@ -141,7 +157,7 @@ static void walk_pde2(MemoryMappingList *list, AddressSpace *as,
              */
             high_paddr = ((hwaddr)(pde & 0x1fe000) << 19);
             start_paddr = (pde & ~0x3fffff) | high_paddr;
-            if (cpu_physical_memory_is_io(start_paddr)) {
+            if (cpu_physical_memory_is_io(as, start_paddr)) {
                 /* I/O region */
                 continue;
             }
@@ -167,7 +183,11 @@ static void walk_pdpe2(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 4; i++) {
         pdpe_addr = (pdpe_start_addr + i * 8) & a20_mask;
-        pdpe = address_space_ldq(as, pdpe_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#ifdef UNICORN_ARCH_POSTFIX
+        pdpe = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(as->uc, as, pdpe_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#else
+        pdpe = address_space_ldq(as->uc, as, pdpe_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#endif
         if (!(pdpe & PG_PRESENT_MASK)) {
             /* not present */
             continue;
@@ -192,7 +212,11 @@ static void walk_pdpe(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 512; i++) {
         pdpe_addr = (pdpe_start_addr + i * 8) & a20_mask;
-        pdpe = address_space_ldq(as, pdpe_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#ifdef UNICORN_ARCH_POSTFIX
+        pdpe = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(as->uc, as, pdpe_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#else
+        pdpe = address_space_ldq(as->uc, as, pdpe_addr, MEMTXATTRS_UNSPECIFIED, NULL);
+#endif
         if (!(pdpe & PG_PRESENT_MASK)) {
             /* not present */
             continue;
@@ -202,7 +226,7 @@ static void walk_pdpe(MemoryMappingList *list, AddressSpace *as,
         if (pdpe & PG_PSE_MASK) {
             /* 1 GB page */
             start_paddr = (pdpe & ~0x3fffffff) & ~(0x1ULL << 63);
-            if (cpu_physical_memory_is_io(start_paddr)) {
+            if (cpu_physical_memory_is_io(as, start_paddr)) {
                 /* I/O region */
                 continue;
             }
@@ -229,7 +253,11 @@ static void walk_pml4e(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 512; i++) {
         pml4e_addr = (pml4e_start_addr + i * 8) & a20_mask;
-        pml4e = address_space_ldq(as, pml4e_addr, MEMTXATTRS_UNSPECIFIED,
+#ifdef UNICORN_ARCH_POSTFIX
+        pml4e = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(as->uc, as, pml4e_addr, MEMTXATTRS_UNSPECIFIED,
+#else
+        pml4e = address_space_ldq(as->uc, as, pml4e_addr, MEMTXATTRS_UNSPECIFIED,
+#endif
                                   NULL);
         if (!(pml4e & PG_PRESENT_MASK)) {
             /* not present */
@@ -252,7 +280,11 @@ static void walk_pml5e(MemoryMappingList *list, AddressSpace *as,
 
     for (i = 0; i < 512; i++) {
         pml5e_addr = (pml5e_start_addr + i * 8) & a20_mask;
-        pml5e = address_space_ldq(as, pml5e_addr, MEMTXATTRS_UNSPECIFIED,
+#ifdef UNICORN_ARCH_POSTFIX
+        pml5e = glue(address_space_ldq, UNICORN_ARCH_POSTFIX)(as->uc, as, pml5e_addr, MEMTXATTRS_UNSPECIFIED,
+#else
+        pml5e = address_space_ldq(as->uc, as, pml5e_addr, MEMTXATTRS_UNSPECIFIED,
+#endif
                                   NULL);
         if (!(pml5e & PG_PRESENT_MASK)) {
             /* not present */
@@ -266,8 +298,7 @@ static void walk_pml5e(MemoryMappingList *list, AddressSpace *as,
 }
 #endif
 
-void x86_cpu_get_memory_mapping(CPUState *cs, MemoryMappingList *list,
-                                Error **errp)
+void x86_cpu_get_memory_mapping(CPUState *cs, MemoryMappingList *list)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;

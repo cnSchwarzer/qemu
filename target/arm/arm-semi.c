@@ -26,17 +26,11 @@
 #include "qemu/osdep.h"
 
 #include "cpu.h"
-#include "hw/semihosting/semihost.h"
-#include "hw/semihosting/console.h"
+//#include "hw/semihosting/semihost.h"
+//#include "hw/semihosting/console.h"
 #include "qemu/log.h"
-#ifdef CONFIG_USER_ONLY
-#include "qemu.h"
-
-#define ARM_ANGEL_HEAP_SIZE (128 * 1024 * 1024)
-#else
 #include "exec/gdbstub.h"
 #include "qemu/cutils.h"
-#endif
 
 #define TARGET_SYS_OPEN        0x01
 #define TARGET_SYS_CLOSE       0x02
@@ -227,37 +221,21 @@ static GuestFD *get_guestfd(int guestfd)
  * errno be per-thread in linux-user mode; in softmmu it is a simple
  * global, and we assume that the guest takes care of avoiding any races.
  */
-#ifndef CONFIG_USER_ONLY
 static target_ulong syscall_err;
 
 #include "exec/softmmu-semi.h"
-#endif
 
 static inline uint32_t set_swi_errno(CPUARMState *env, uint32_t code)
 {
     if (code == (uint32_t)-1) {
-#ifdef CONFIG_USER_ONLY
-        CPUState *cs = env_cpu(env);
-        TaskState *ts = cs->opaque;
-
-        ts->swi_errno = errno;
-#else
         syscall_err = errno;
-#endif
     }
     return code;
 }
 
 static inline uint32_t get_swi_errno(CPUARMState *env)
 {
-#ifdef CONFIG_USER_ONLY
-    CPUState *cs = env_cpu(env);
-    TaskState *ts = cs->opaque;
-
-    return ts->swi_errno;
-#else
     return syscall_err;
-#endif
 }
 
 static target_ulong arm_semi_syscall_len;
@@ -565,9 +543,7 @@ static uint32_t featurefile_readfn(ARMCPU *cpu, GuestFD *gf,
                                    target_ulong buf, uint32_t len)
 {
     uint32_t i;
-#ifndef CONFIG_USER_ONLY
     CPUARMState *env = &cpu->env;
-#endif
     char *s;
 
     s = lock_user(VERIFY_WRITE, buf, len, 0);
@@ -929,33 +905,16 @@ target_ulong do_arm_semihosting(CPUARMState *env)
             size_t input_size;
             size_t output_size;
             int status = 0;
-#if !defined(CONFIG_USER_ONLY)
             const char *cmdline;
-#else
-            TaskState *ts = cs->opaque;
-#endif
             GET_ARG(0);
             GET_ARG(1);
             input_size = arg1;
             /* Compute the size of the output string.  */
-#if !defined(CONFIG_USER_ONLY)
             cmdline = semihosting_get_cmdline();
             if (cmdline == NULL) {
                 cmdline = ""; /* Default to an empty line. */
             }
             output_size = strlen(cmdline) + 1; /* Count terminating 0. */
-#else
-            unsigned int i;
-
-            output_size = ts->info->arg_end - ts->info->arg_start;
-            if (!output_size) {
-                /*
-                 * We special-case the "empty command line" case (argc==0).
-                 * Just provide the terminating 0.
-                 */
-                output_size = 1;
-            }
-#endif
 
             if (output_size > input_size) {
                 /* Not enough space to store command-line arguments.  */
@@ -978,30 +937,7 @@ target_ulong do_arm_semihosting(CPUARMState *env)
             }
 
             /* Copy the command-line arguments.  */
-#if !defined(CONFIG_USER_ONLY)
             pstrcpy(output_buffer, output_size, cmdline);
-#else
-            if (output_size == 1) {
-                /* Empty command-line.  */
-                output_buffer[0] = '\0';
-                goto out;
-            }
-
-            if (copy_from_user(output_buffer, ts->info->arg_start,
-                               output_size)) {
-                errno = EFAULT;
-                status = set_swi_errno(env, -1);
-                goto out;
-            }
-
-            /* Separate arguments by white spaces.  */
-            for (i = 0; i < output_size - 1; i++) {
-                if (output_buffer[i] == 0) {
-                    output_buffer[i] = ' ';
-                }
-            }
-        out:
-#endif
             /* Unlock the buffer on the ARM side.  */
             unlock_user(output_buffer, arg0, output_size);
 
@@ -1012,45 +948,15 @@ target_ulong do_arm_semihosting(CPUARMState *env)
             target_ulong retvals[4];
             target_ulong limit;
             int i;
-#ifdef CONFIG_USER_ONLY
-            TaskState *ts = cs->opaque;
-#endif
 
             GET_ARG(0);
 
-#ifdef CONFIG_USER_ONLY
-            /*
-             * Some C libraries assume the heap immediately follows .bss, so
-             * allocate it using sbrk.
-             */
-            if (!ts->heap_limit) {
-                abi_ulong ret;
-
-                ts->heap_base = do_brk(0);
-                limit = ts->heap_base + ARM_ANGEL_HEAP_SIZE;
-                /* Try a big heap, and reduce the size if that fails.  */
-                for (;;) {
-                    ret = do_brk(limit);
-                    if (ret >= limit) {
-                        break;
-                    }
-                    limit = (ts->heap_base >> 1) + (limit >> 1);
-                }
-                ts->heap_limit = limit;
-            }
-
-            retvals[0] = ts->heap_base;
-            retvals[1] = ts->heap_limit;
-            retvals[2] = ts->stack_base;
-            retvals[3] = 0; /* Stack limit.  */
-#else
             limit = ram_size;
             /* TODO: Make this use the limit of the loaded application.  */
             retvals[0] = limit / 2;
             retvals[1] = limit;
             retvals[2] = limit; /* Stack base */
             retvals[3] = 0; /* Stack limit.  */
-#endif
 
             for (i = 0; i < ARRAY_SIZE(retvals); i++) {
                 bool fail;

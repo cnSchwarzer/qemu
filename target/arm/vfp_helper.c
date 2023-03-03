@@ -21,16 +21,12 @@
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "internals.h"
-#ifdef CONFIG_TCG
 #include "qemu/log.h"
 #include "fpu/softfloat.h"
-#endif
 
 /* VFP support.  We follow the convention used for VFP instructions:
    Single precision routines have a "s" suffix, double precision a
    "d" suffix.  */
-
-#ifdef CONFIG_TCG
 
 /* Convert host exception flags to vfp form.  */
 static inline int vfp_exceptbits_from_host(int host_bits)
@@ -148,19 +144,6 @@ static void vfp_set_fpscr_to_host(CPUARMState *env, uint32_t val)
     set_float_exception_flags(0, &env->vfp.standard_fp_status);
 }
 
-#else
-
-static uint32_t vfp_get_fpscr_from_host(CPUARMState *env)
-{
-    return 0;
-}
-
-static void vfp_set_fpscr_to_host(CPUARMState *env, uint32_t val)
-{
-}
-
-#endif
-
 uint32_t HELPER(vfp_get_fpscr)(CPUARMState *env)
 {
     uint32_t i, fpscr;
@@ -226,8 +209,6 @@ void vfp_set_fpscr(CPUARMState *env, uint32_t val)
     HELPER(vfp_set_fpscr)(env, val);
 }
 
-#ifdef CONFIG_TCG
-
 #define VFP_HELPER(name, p) HELPER(glue(glue(vfp_,name),p))
 
 #define VFP_BINOP(name) \
@@ -283,7 +264,7 @@ float64 VFP_HELPER(sqrt, d)(float64 a, CPUARMState *env)
 
 static void softfloat_to_vfp_compare(CPUARMState *env, int cmp)
 {
-    uint32_t flags;
+    uint32_t flags = 0;
     switch (cmp) {
     case float_relation_equal:
         flags = 0x6;
@@ -299,6 +280,7 @@ static void softfloat_to_vfp_compare(CPUARMState *env, int cmp)
         break;
     default:
         g_assert_not_reached();
+        break;
     }
     env->vfp.xregs[ARM_VFP_FPSCR] =
         deposit32(env->vfp.xregs[ARM_VFP_FPSCR], 28, 4, flags);
@@ -368,10 +350,17 @@ float32 VFP_HELPER(fcvts, d)(float64 x, CPUARMState *env)
 }
 
 /* VFP3 fixed point conversion.  */
+#ifdef _MSC_VER
+#define VFP_CONV_FIX_FLOAT(name, p, fsz, isz, itype) \
+float##fsz HELPER(vfp_##name##to##p)(uint##isz##_t  x, uint32_t shift, \
+                                     void *fpstp) \
+{ return itype##_to_##float##fsz##_scalbn(x, 0 - shift, fpstp); }
+#else
 #define VFP_CONV_FIX_FLOAT(name, p, fsz, isz, itype) \
 float##fsz HELPER(vfp_##name##to##p)(uint##isz##_t  x, uint32_t shift, \
                                      void *fpstp) \
 { return itype##_to_##float##fsz##_scalbn(x, -shift, fpstp); }
+#endif
 
 #define VFP_CONV_FLOAT_FIX_ROUND(name, p, fsz, isz, itype, ROUND, suff)   \
 uint##isz##_t HELPER(vfp_to##name##p##suff)(float##fsz x, uint32_t shift, \
@@ -416,22 +405,38 @@ VFP_CONV_FIX_A64(uq, s, 32, 64, uint64)
 
 uint32_t HELPER(vfp_sltoh)(uint32_t x, uint32_t shift, void *fpst)
 {
+#ifdef _MSC_VER
+    return int32_to_float16_scalbn(x, 0 - shift, fpst);
+#else
     return int32_to_float16_scalbn(x, -shift, fpst);
+#endif
 }
 
 uint32_t HELPER(vfp_ultoh)(uint32_t x, uint32_t shift, void *fpst)
 {
+#ifdef _MSC_VER
+    return uint32_to_float16_scalbn(x, 0 - shift, fpst);
+#else
     return uint32_to_float16_scalbn(x, -shift, fpst);
+#endif
 }
 
 uint32_t HELPER(vfp_sqtoh)(uint64_t x, uint32_t shift, void *fpst)
 {
+#ifdef _MSC_VER
+    return int64_to_float16_scalbn(x, 0 - shift, fpst);
+#else
     return int64_to_float16_scalbn(x, -shift, fpst);
+#endif
 }
 
 uint32_t HELPER(vfp_uqtoh)(uint64_t x, uint32_t shift, void *fpst)
 {
+#ifdef _MSC_VER
+    return uint64_to_float16_scalbn(x, 0 - shift, fpst);
+#else
     return uint64_to_float16_scalbn(x, -shift, fpst);
+#endif
 }
 
 uint32_t HELPER(vfp_toshh)(uint32_t x, uint32_t shift, void *fpst)
@@ -700,6 +705,8 @@ static bool round_to_inf(float_status *fpst, bool sign_bit)
     }
 
     g_assert_not_reached();
+    // never reach here
+    return false;
 }
 
 uint32_t HELPER(recpe_f16)(uint32_t input, void *fpstp)
@@ -1205,7 +1212,11 @@ uint64_t HELPER(fjcvtzs)(float64 value, void *vstatus)
 
         /* Honor the sign.  */
         if (sign) {
+#ifdef _MSC_VER
+            frac = 0 - frac;
+#else
             frac = -frac;
+#endif
         }
     }
 
@@ -1341,6 +1352,7 @@ void HELPER(check_hcr_el2_trap)(CPUARMState *env, uint32_t rt, uint32_t reg)
         break;
     default:
         g_assert_not_reached();
+        break;
     }
 
     syndrome = ((EC_FPIDTRAP << ARM_EL_EC_SHIFT)
@@ -1350,5 +1362,3 @@ void HELPER(check_hcr_el2_trap)(CPUARMState *env, uint32_t rt, uint32_t reg)
 
     raise_exception(env, EXCP_HYP_TRAP, syndrome, 2);
 }
-
-#endif

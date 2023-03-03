@@ -1,6 +1,7 @@
 #ifndef BSWAP_H
 #define BSWAP_H
 
+#include "osdep.h"
 #include "fpu/softfloat-types.h"
 
 #ifdef CONFIG_MACHINE_BSWAP_H
@@ -329,44 +330,72 @@ static inline void stb_p(void *ptr, uint8_t v)
 static inline int lduw_he_p(const void *ptr)
 {
     uint16_t r;
+#ifdef _MSC_VER
+    memcpy(&r, ptr, sizeof(r));
+#else
     __builtin_memcpy(&r, ptr, sizeof(r));
+#endif
     return r;
 }
 
 static inline int ldsw_he_p(const void *ptr)
 {
     int16_t r;
+#ifdef _MSC_VER
+    memcpy(&r, ptr, sizeof(r));
+#else
     __builtin_memcpy(&r, ptr, sizeof(r));
+#endif
     return r;
 }
 
 static inline void stw_he_p(void *ptr, uint16_t v)
 {
+#ifdef _MSC_VER
+    memcpy(ptr, &v, sizeof(v));
+#else
     __builtin_memcpy(ptr, &v, sizeof(v));
+#endif
 }
 
 static inline int ldl_he_p(const void *ptr)
 {
     int32_t r;
+#ifdef _MSC_VER
+    memcpy(&r, ptr, sizeof(r));
+#else
     __builtin_memcpy(&r, ptr, sizeof(r));
+#endif
     return r;
 }
 
 static inline void stl_he_p(void *ptr, uint32_t v)
 {
+#ifdef _MSC_VER
+    memcpy(ptr, &v, sizeof(v));
+#else
     __builtin_memcpy(ptr, &v, sizeof(v));
+#endif
 }
 
 static inline uint64_t ldq_he_p(const void *ptr)
 {
     uint64_t r;
+#ifdef _MSC_VER
+    memcpy(&r, ptr, sizeof(r));
+#else
     __builtin_memcpy(&r, ptr, sizeof(r));
+#endif
     return r;
 }
 
 static inline void stq_he_p(void *ptr, uint64_t v)
 {
+#ifdef _MSC_VER
+    memcpy(ptr, &v, sizeof(v));
+#else
     __builtin_memcpy(ptr, &v, sizeof(v));
+#endif
 }
 
 static inline int lduw_le_p(const void *ptr)
@@ -528,7 +557,7 @@ static inline unsigned long leul_to_cpu(unsigned long v)
             stq_ ## END ## _p(ptr, v);                                  \
             break;                                                      \
         default:                                                        \
-            g_assert_not_reached();                                     \
+            break; /* g_assert_not_reached(); */                        \
         }                                                               \
     }                                                                   \
     static inline uint64_t ldn_## END ## _p(const void *ptr, int sz)    \
@@ -543,7 +572,7 @@ static inline unsigned long leul_to_cpu(unsigned long v)
         case 8:                                                         \
             return ldq_ ## END ## _p(ptr);                              \
         default:                                                        \
-            g_assert_not_reached();                                     \
+            return 0; /* g_assert_not_reached(); */                     \
         }                                                               \
     }
 

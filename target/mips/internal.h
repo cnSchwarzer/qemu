@@ -9,6 +9,9 @@
 #define MIPS_INTERNAL_H
 
 #include "fpu/softfloat-helpers.h"
+#include "cpu.h"
+
+struct uc_struct;
 
 /*
  * MMU types, the first four entries have the same layout as the
@@ -80,15 +83,10 @@ enum CPUMIPSMSADataFormat {
 
 void mips_cpu_do_interrupt(CPUState *cpu);
 bool mips_cpu_exec_interrupt(CPUState *cpu, int int_req);
-void mips_cpu_dump_state(CPUState *cpu, FILE *f, int flags);
 hwaddr mips_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
-int mips_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
-int mips_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 void mips_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
                                   MMUAccessType access_type,
                                   int mmu_idx, uintptr_t retaddr);
-
-#if !defined(CONFIG_USER_ONLY)
 
 typedef struct r4k_tlb_t r4k_tlb_t;
 struct r4k_tlb_t {
@@ -150,13 +148,8 @@ void mips_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                     MemTxResult response, uintptr_t retaddr);
 hwaddr cpu_mips_translate_address(CPUMIPSState *env, target_ulong address,
                                   int rw);
-#endif
 
 #define cpu_signal_handler cpu_mips_signal_handler
-
-#ifndef CONFIG_USER_ONLY
-extern const VMStateDescription vmstate_mips_cpu;
-#endif
 
 static inline bool cpu_mips_hw_interrupts_enabled(CPUMIPSState *env)
 {
@@ -200,7 +193,7 @@ static inline bool cpu_mips_hw_interrupts_pending(CPUMIPSState *env)
     return r;
 }
 
-void mips_tcg_init(void);
+void mips_tcg_init(struct uc_struct *uc);
 
 /* TODO QOM'ify CPU reset and remove */
 void cpu_state_reset(CPUMIPSState *s);
@@ -305,23 +298,20 @@ static inline int mips_vpe_active(CPUMIPSState *env)
     return active;
 }
 
-static inline int mips_vp_active(CPUMIPSState *env)
+static inline int mips_vp_active(CPUMIPSState *env, CPUState *cpu)
 {
-    CPUState *other_cs = first_cpu;
-
     /* Check if the VP disabled other VPs (which means the VP is enabled) */
     if ((env->CP0_VPControl >> CP0VPCtl_DIS) & 1) {
         return 1;
     }
 
     /* Check if the virtual processor is disabled due to a DVP */
-    CPU_FOREACH(other_cs) {
-        MIPSCPU *other_cpu = MIPS_CPU(other_cs);
-        if ((&other_cpu->env != env) &&
-            ((other_cpu->env.CP0_VPControl >> CP0VPCtl_DIS) & 1)) {
-            return 0;
-        }
+    MIPSCPU *cs = MIPS_CPU(cpu);
+    if ((&cs->env != env) &&
+            ((cs->env.CP0_VPControl >> CP0VPCtl_DIS) & 1)) {
+        return 0;
     }
+
     return 1;
 }
 

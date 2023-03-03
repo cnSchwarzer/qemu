@@ -658,7 +658,7 @@ uint32_t HELPER(neon_rshl_s32)(uint32_t valop, uint32_t shiftop)
     if ((shift >= 32) || (shift <= -32)) {
         dest = 0;
     } else if (shift < 0) {
-        int64_t big_dest = ((int64_t)val + (1 << (-1 - shift)));
+        int64_t big_dest = ((int64_t)val + (1ULL << (-1 - shift)));
         dest = big_dest >> -shift;
     } else {
         dest = val << shift;
@@ -719,7 +719,7 @@ uint32_t HELPER(neon_rshl_u32)(uint32_t val, uint32_t shiftop)
     } else if (shift == -32) {
         dest = val >> 31;
     } else if (shift < 0) {
-        uint64_t big_dest = ((uint64_t)val + (1 << (-1 - shift)));
+        uint64_t big_dest = ((uint64_t)val + (1ULL << (-1 - shift)));
         dest = big_dest >> -shift;
     } else {
         dest = val << shift;
@@ -952,7 +952,7 @@ uint32_t HELPER(neon_qrshl_u32)(CPUARMState *env, uint32_t val, uint32_t shiftop
     } else if (shift == -32) {
         dest = val >> 31;
     } else if (shift < 0) {
-        uint64_t big_dest = ((uint64_t)val + (1 << (-1 - shift)));
+        uint64_t big_dest = ((uint64_t)val + (1ULL << (-1 - shift)));
         dest = big_dest >> -shift;
     } else {
         dest = val << shift;
@@ -1006,7 +1006,7 @@ uint64_t HELPER(neon_qrshl_u64)(CPUARMState *env, uint64_t val, uint64_t shiftop
     if (tmp >= (ssize_t)sizeof(src1) * 8) { \
         if (src1) { \
             SET_QC(); \
-            dest = (typeof(dest))(1 << (sizeof(src1) * 8 - 1)); \
+            dest = (1 << (sizeof(src1) * 8 - 1)); \
             if (src1 > 0) { \
                 dest--; \
             } \
@@ -1048,7 +1048,7 @@ uint32_t HELPER(neon_qrshl_s32)(CPUARMState *env, uint32_t valop, uint32_t shift
     } else if (shift <= -32) {
         dest = 0;
     } else if (shift < 0) {
-        int64_t big_dest = ((int64_t)val + (1 << (-1 - shift)));
+        int64_t big_dest = ((int64_t)val + (1ULL << (-1 - shift)));
         dest = big_dest >> -shift;
     } else {
         dest = val << shift;
@@ -1719,20 +1719,34 @@ uint64_t HELPER(neon_negl_u16)(uint64_t x)
 {
     uint16_t tmp;
     uint64_t result;
+#ifdef _MSC_VER
+    result = (uint16_t)(0 - x);
+    tmp = 0 - (x >> 16);
+    result |= (uint64_t)tmp << 16;
+    tmp = 0 - (x >> 32);
+    result |= (uint64_t)tmp << 32;
+    tmp = 0 - (x >> 48);
+#else
     result = (uint16_t)-x;
     tmp = -(x >> 16);
     result |= (uint64_t)tmp << 16;
     tmp = -(x >> 32);
     result |= (uint64_t)tmp << 32;
     tmp = -(x >> 48);
+#endif
     result |= (uint64_t)tmp << 48;
     return result;
 }
 
 uint64_t HELPER(neon_negl_u32)(uint64_t x)
 {
+#ifdef _MSC_VER
+    uint32_t low = 0 - x;
+    uint32_t high = 0 - (x >> 32);
+#else
     uint32_t low = -x;
     uint32_t high = -(x >> 32);
+#endif
     return low | ((uint64_t)high << 32);
 }
 
@@ -1820,7 +1834,11 @@ uint32_t HELPER(neon_qabs_s32)(CPUARMState *env, uint32_t x)
         SET_QC();
         x = ~SIGNBIT;
     } else if ((int32_t)x < 0) {
+#ifdef _MSC_VER
+        x = 0 - x;
+#else
         x = -x;
+#endif
     }
     return x;
 }
@@ -1831,7 +1849,11 @@ uint32_t HELPER(neon_qneg_s32)(CPUARMState *env, uint32_t x)
         SET_QC();
         x = ~SIGNBIT;
     } else {
+#ifdef _MSC_VER
+        x = 0 - x;
+#else
         x = -x;
+#endif
     }
     return x;
 }
@@ -1842,7 +1864,11 @@ uint64_t HELPER(neon_qabs_s64)(CPUARMState *env, uint64_t x)
         SET_QC();
         x = ~SIGNBIT64;
     } else if ((int64_t)x < 0) {
+#ifdef _MSC_VER
+        x = 0 - x;
+#else
         x = -x;
+#endif
     }
     return x;
 }
@@ -1853,7 +1879,11 @@ uint64_t HELPER(neon_qneg_s64)(CPUARMState *env, uint64_t x)
         SET_QC();
         x = ~SIGNBIT64;
     } else {
+#ifdef _MSC_VER
+        x = 0 - x;
+#else
         x = -x;
+#endif
     }
     return x;
 }

@@ -21,7 +21,6 @@
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "qemu/host-utils.h"
-#include "qemu/main-loop.h"
 #include "exec/helper-proto.h"
 #include "helper_regs.h"
 #include "exec/cpu_ldst.h"
@@ -60,10 +59,14 @@ static void *probe_contiguous(CPUPPCState *env, target_ulong addr, uint32_t nb,
                               MMUAccessType access_type, int mmu_idx,
                               uintptr_t raddr)
 {
-    void *host1, *host2;
+    char *host1, *host2;
     uint32_t nb_pg1, nb_pg2;
 
+#ifdef _MSC_VER
+    nb_pg1 = 0 - (addr | TARGET_PAGE_MASK);
+#else
     nb_pg1 = -(addr | TARGET_PAGE_MASK);
+#endif
     if (likely(nb <= nb_pg1)) {
         /* The entire operation is on a single page.  */
         return probe_access(env, addr, nb, access_type, mmu_idx, raddr);
@@ -86,7 +89,7 @@ void helper_lmw(CPUPPCState *env, target_ulong addr, uint32_t reg)
 {
     uintptr_t raddr = GETPC();
     int mmu_idx = cpu_mmu_index(env, false);
-    void *host = probe_contiguous(env, addr, (32 - reg) * 4,
+    char *host = probe_contiguous(env, addr, (32 - reg) * 4,
                                   MMU_DATA_LOAD, mmu_idx, raddr);
 
     if (likely(host)) {
@@ -108,7 +111,7 @@ void helper_stmw(CPUPPCState *env, target_ulong addr, uint32_t reg)
 {
     uintptr_t raddr = GETPC();
     int mmu_idx = cpu_mmu_index(env, false);
-    void *host = probe_contiguous(env, addr, (32 - reg) * 4,
+    char *host = probe_contiguous(env, addr, (32 - reg) * 4,
                                   MMU_DATA_STORE, mmu_idx, raddr);
 
     if (likely(host)) {
@@ -130,7 +133,7 @@ static void do_lsw(CPUPPCState *env, target_ulong addr, uint32_t nb,
                    uint32_t reg, uintptr_t raddr)
 {
     int mmu_idx;
-    void *host;
+    char *host;
     uint32_t val;
 
     if (unlikely(nb == 0)) {
@@ -219,7 +222,7 @@ void helper_stsw(CPUPPCState *env, target_ulong addr, uint32_t nb,
 {
     uintptr_t raddr = GETPC();
     int mmu_idx;
-    void *host;
+    char *host;
     uint32_t val;
 
     if (unlikely(nb == 0)) {
@@ -294,7 +297,11 @@ static void dcbz_common(CPUPPCState *env, target_ulong addr,
 
     /* Check reservation */
     if ((env->reserve_addr & mask) == addr)  {
+#ifdef _MSC_VER
+        env->reserve_addr = (target_ulong)(0ULL - 1ULL);
+#else
         env->reserve_addr = (target_ulong)-1ULL;
+#endif
     }
 
     /* Try fast path translate */
@@ -333,11 +340,9 @@ void helper_icbi(CPUPPCState *env, target_ulong addr)
 
 void helper_icbiep(CPUPPCState *env, target_ulong addr)
 {
-#if !defined(CONFIG_USER_ONLY)
     /* See comments above */
     addr &= ~(env->dcache_line_size - 1);
     cpu_ldl_mmuidx_ra(env, addr, PPC_TLB_EPID_LOAD, GETPC());
-#endif
 }
 
 /* XXX: to be tested */

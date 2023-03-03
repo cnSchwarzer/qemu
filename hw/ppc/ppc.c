@@ -24,19 +24,19 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
-#include "hw/irq.h"
+//#include "hw/irq.h"
 #include "hw/ppc/ppc.h"
-#include "hw/ppc/ppc_e500.h"
+//#include "hw/ppc/ppc_e500.h"
 #include "qemu/timer.h"
 #include "sysemu/cpus.h"
-#include "qemu/log.h"
-#include "qemu/main-loop.h"
-#include "qemu/error-report.h"
-#include "sysemu/kvm.h"
-#include "sysemu/runstate.h"
-#include "kvm_ppc.h"
-#include "migration/vmstate.h"
-#include "trace.h"
+//#include "qemu/log.h"
+//#include "qemu/main-loop.h"
+//#include "qemu/error-report.h"
+//#include "sysemu/kvm.h"
+//#include "sysemu/runstate.h"
+//#include "kvm_ppc.h"
+//#include "migration/vmstate.h"
+//#include "trace.h"
 
 //#define PPC_DEBUG_IRQ
 //#define PPC_DEBUG_TB
@@ -54,23 +54,20 @@
 #  define LOG_TB(...) do { } while (0)
 #endif
 
+#if 0
 static void cpu_ppc_tb_stop (CPUPPCState *env);
 static void cpu_ppc_tb_start (CPUPPCState *env);
+#endif
 
 void ppc_set_irq(PowerPCCPU *cpu, int n_IRQ, int level)
 {
     CPUState *cs = CPU(cpu);
     CPUPPCState *env = &cpu->env;
+#if 0
     unsigned int old_pending;
-    bool locked = false;
-
-    /* We may already have the BQL if coming from the reset path */
-    if (!qemu_mutex_iothread_locked()) {
-        locked = true;
-        qemu_mutex_lock_iothread();
-    }
 
     old_pending = env->pending_interrupts;
+#endif
 
     if (level) {
         env->pending_interrupts |= 1 << n_IRQ;
@@ -82,20 +79,18 @@ void ppc_set_irq(PowerPCCPU *cpu, int n_IRQ, int level)
         }
     }
 
+#if 0
     if (old_pending != env->pending_interrupts) {
         kvmppc_set_interrupt(cpu, n_IRQ, level);
     }
-
+#endif
 
     LOG_IRQ("%s: %p n_IRQ %d level %d => pending %08" PRIx32
                 "req %08x\n", __func__, env, n_IRQ, level,
                 env->pending_interrupts, CPU(cpu)->interrupt_request);
-
-    if (locked) {
-        qemu_mutex_unlock_iothread();
-    }
 }
 
+#if 0
 /* PowerPC 6xx / 7xx internal IRQ controller */
 static void ppc6xx_set_irq(void *opaque, int pin, int level)
 {
@@ -175,16 +170,20 @@ static void ppc6xx_set_irq(void *opaque, int pin, int level)
             env->irq_input_state &= ~(1 << pin);
     }
 }
+#endif
 
 void ppc6xx_irq_init(PowerPCCPU *cpu)
 {
+#if 0
     CPUPPCState *env = &cpu->env;
 
     env->irq_inputs = (void **)qemu_allocate_irqs(&ppc6xx_set_irq, cpu,
                                                   PPC6xx_INPUT_NB);
+#endif
 }
 
 #if defined(TARGET_PPC64)
+#if 0
 /* PowerPC 970 internal IRQ controller */
 static void ppc970_set_irq(void *opaque, int pin, int level)
 {
@@ -232,7 +231,7 @@ static void ppc970_set_irq(void *opaque, int pin, int level)
             } else {
                 LOG_IRQ("%s: restart the CPU\n", __func__);
                 cs->halted = 0;
-                qemu_cpu_kick(cs);
+//                qemu_cpu_kick(cs);
             }
             break;
         case PPC970_INPUT_HRESET:
@@ -262,15 +261,19 @@ static void ppc970_set_irq(void *opaque, int pin, int level)
             env->irq_input_state &= ~(1 << pin);
     }
 }
+#endif
 
 void ppc970_irq_init(PowerPCCPU *cpu)
 {
+#if 0
     CPUPPCState *env = &cpu->env;
 
     env->irq_inputs = (void **)qemu_allocate_irqs(&ppc970_set_irq, cpu,
                                                   PPC970_INPUT_NB);
+#endif
 }
 
+#if 0
 /* POWER7 internal IRQ controller */
 static void power7_set_irq(void *opaque, int pin, int level)
 {
@@ -292,15 +295,19 @@ static void power7_set_irq(void *opaque, int pin, int level)
         return;
     }
 }
+#endif
 
 void ppcPOWER7_irq_init(PowerPCCPU *cpu)
 {
+#if 0
     CPUPPCState *env = &cpu->env;
 
     env->irq_inputs = (void **)qemu_allocate_irqs(&power7_set_irq, cpu,
                                                   POWER7_INPUT_NB);
+#endif
 }
 
+#if 0
 /* POWER9 internal IRQ controller */
 static void power9_set_irq(void *opaque, int pin, int level)
 {
@@ -328,13 +335,16 @@ static void power9_set_irq(void *opaque, int pin, int level)
         return;
     }
 }
+#endif
 
 void ppcPOWER9_irq_init(PowerPCCPU *cpu)
 {
+#if 0
     CPUPPCState *env = &cpu->env;
 
     env->irq_inputs = (void **)qemu_allocate_irqs(&power9_set_irq, cpu,
                                                   POWER9_INPUT_NB);
+#endif
 }
 #endif /* defined(TARGET_PPC64) */
 
@@ -343,7 +353,7 @@ void ppc40x_core_reset(PowerPCCPU *cpu)
     CPUPPCState *env = &cpu->env;
     target_ulong dbsr;
 
-    qemu_log_mask(CPU_LOG_RESET, "Reset PowerPC core\n");
+//    qemu_log_mask(CPU_LOG_RESET, "Reset PowerPC core\n");
     cpu_interrupt(CPU(cpu), CPU_INTERRUPT_RESET);
     dbsr = env->spr[SPR_40x_DBSR];
     dbsr &= ~0x00000300;
@@ -356,7 +366,7 @@ void ppc40x_chip_reset(PowerPCCPU *cpu)
     CPUPPCState *env = &cpu->env;
     target_ulong dbsr;
 
-    qemu_log_mask(CPU_LOG_RESET, "Reset PowerPC chip\n");
+//    qemu_log_mask(CPU_LOG_RESET, "Reset PowerPC chip\n");
     cpu_interrupt(CPU(cpu), CPU_INTERRUPT_RESET);
     /* XXX: TODO reset all internal peripherals */
     dbsr = env->spr[SPR_40x_DBSR];
@@ -367,8 +377,8 @@ void ppc40x_chip_reset(PowerPCCPU *cpu)
 
 void ppc40x_system_reset(PowerPCCPU *cpu)
 {
-    qemu_log_mask(CPU_LOG_RESET, "Reset PowerPC system\n");
-    qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+//    qemu_log_mask(CPU_LOG_RESET, "Reset PowerPC system\n");
+//    qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
 }
 
 void store_40x_dbcr0(CPUPPCState *env, uint32_t val)
@@ -394,6 +404,7 @@ void store_40x_dbcr0(CPUPPCState *env, uint32_t val)
     }
 }
 
+#if 0
 /* PowerPC 40x internal IRQ controller */
 static void ppc40x_set_irq(void *opaque, int pin, int level)
 {
@@ -449,7 +460,7 @@ static void ppc40x_set_irq(void *opaque, int pin, int level)
             } else {
                 LOG_IRQ("%s: restart the CPU\n", __func__);
                 cs->halted = 0;
-                qemu_cpu_kick(cs);
+//                qemu_cpu_kick(cs);
             }
             break;
         case PPC40x_INPUT_DEBUG:
@@ -469,15 +480,19 @@ static void ppc40x_set_irq(void *opaque, int pin, int level)
             env->irq_input_state &= ~(1 << pin);
     }
 }
+#endif
 
 void ppc40x_irq_init(PowerPCCPU *cpu)
 {
+#if 0
     CPUPPCState *env = &cpu->env;
 
     env->irq_inputs = (void **)qemu_allocate_irqs(&ppc40x_set_irq,
                                                   cpu, PPC40x_INPUT_NB);
+#endif
 }
 
+#if 0
 /* PowerPC E500 internal IRQ controller */
 static void ppce500_set_irq(void *opaque, int pin, int level)
 {
@@ -495,7 +510,7 @@ static void ppce500_set_irq(void *opaque, int pin, int level)
             if (level) {
                 LOG_IRQ("%s: reset the PowerPC system\n",
                             __func__);
-                qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+//                qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
             }
             break;
         case PPCE500_INPUT_RESET_CORE:
@@ -533,18 +548,22 @@ static void ppce500_set_irq(void *opaque, int pin, int level)
             env->irq_input_state &= ~(1 << pin);
     }
 }
+#endif
 
 void ppce500_irq_init(PowerPCCPU *cpu)
 {
+#if 0
     CPUPPCState *env = &cpu->env;
 
     env->irq_inputs = (void **)qemu_allocate_irqs(&ppce500_set_irq,
                                                   cpu, PPCE500_INPUT_NB);
+#endif
 }
 
 /* Enable or Disable the E500 EPR capability */
 void ppce500_set_mpic_proxy(bool enabled)
 {
+#if 0
     CPUState *cs;
 
     CPU_FOREACH(cs) {
@@ -555,6 +574,7 @@ void ppce500_set_mpic_proxy(bool enabled)
             kvmppc_set_mpic_proxy(cpu, enabled);
         }
     }
+#endif
 }
 
 /*****************************************************************************/
@@ -571,9 +591,11 @@ uint64_t cpu_ppc_load_tbl (CPUPPCState *env)
     ppc_tb_t *tb_env = env->tb_env;
     uint64_t tb;
 
+#if 0
     if (kvm_enabled()) {
         return env->spr[SPR_TBL];
     }
+#endif
 
     tb = cpu_ppc_get_tb(tb_env, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL), tb_env->tb_offset);
     LOG_TB("%s: tb %016" PRIx64 "\n", __func__, tb);
@@ -594,9 +616,11 @@ static inline uint32_t _cpu_ppc_load_tbu(CPUPPCState *env)
 
 uint32_t cpu_ppc_load_tbu (CPUPPCState *env)
 {
+#if 0
     if (kvm_enabled()) {
         return env->spr[SPR_TBU];
     }
+#endif
 
     return _cpu_ppc_load_tbu(env);
 }
@@ -711,6 +735,7 @@ void cpu_ppc_store_tbu40(CPUPPCState *env, uint64_t value)
                      &tb_env->tb_offset, tb);
 }
 
+#if 0
 static void cpu_ppc_tb_stop (CPUPPCState *env)
 {
     ppc_tb_t *tb_env = env->tb_env;
@@ -753,6 +778,7 @@ static void cpu_ppc_tb_start (CPUPPCState *env)
         cpu_ppc_store_tb(tb_env, vmclk, &tb_env->atb_offset, atb);
     }
 }
+#endif
 
 bool ppc_decr_clear_on_delivery(CPUPPCState *env)
 {
@@ -772,7 +798,11 @@ static inline int64_t _cpu_ppc_load_decr(CPUPPCState *env, uint64_t next)
     } else if (tb_env->flags & PPC_TIMER_BOOKE) {
         decr = 0;
     }  else {
+#ifdef _MSC_VER
+        decr = 0 - muldiv64(0 - diff, tb_env->decr_freq, NANOSECONDS_PER_SECOND);
+#else
         decr = -muldiv64(-diff, tb_env->decr_freq, NANOSECONDS_PER_SECOND);
+#endif
     }
     LOG_TB("%s: %016" PRIx64 "\n", __func__, decr);
 
@@ -784,9 +814,11 @@ target_ulong cpu_ppc_load_decr(CPUPPCState *env)
     ppc_tb_t *tb_env = env->tb_env;
     uint64_t decr;
 
+#if 0
     if (kvm_enabled()) {
         return env->spr[SPR_DECR];
     }
+#endif
 
     decr = _cpu_ppc_load_decr(env, tb_env->decr_next);
 
@@ -870,6 +902,7 @@ static void __cpu_ppc_store_decr(PowerPCCPU *cpu, uint64_t *nextp,
                                  target_ulong decr, target_ulong value,
                                  int nr_bits)
 {
+#if 0
     CPUPPCState *env = &cpu->env;
     ppc_tb_t *tb_env = env->tb_env;
     uint64_t now, next;
@@ -885,10 +918,12 @@ static void __cpu_ppc_store_decr(PowerPCCPU *cpu, uint64_t *nextp,
     LOG_TB("%s: " TARGET_FMT_lx " => " TARGET_FMT_lx "\n", __func__,
                 decr, value);
 
+#if 0
     if (kvm_enabled()) {
         /* KVM handles decrementer exceptions, we don't need our own timer */
         return;
     }
+#endif
 
     /*
      * Going from 2 -> 1, 1 -> 0 or 0 -> -1 is the event to generate a DEC
@@ -923,6 +958,7 @@ static void __cpu_ppc_store_decr(PowerPCCPU *cpu, uint64_t *nextp,
 
     /* Adjust timer */
     timer_mod(timer, next);
+#endif
 }
 
 static inline void _cpu_ppc_store_decr(PowerPCCPU *cpu, target_ulong decr,
@@ -1008,13 +1044,14 @@ static void cpu_ppc_set_tb_clk (void *opaque, uint32_t freq)
     cpu_ppc_store_purr(env, 0x0000000000000000ULL);
 }
 
+#if 0
 static void timebase_save(PPCTimebase *tb)
 {
     uint64_t ticks = cpu_get_host_ticks();
     PowerPCCPU *first_ppc_cpu = POWERPC_CPU(first_cpu);
 
     if (!first_ppc_cpu->env.tb_env) {
-        error_report("No timebase object");
+//        error_report("No timebase object");
         return;
     }
 
@@ -1037,7 +1074,7 @@ static void timebase_load(PPCTimebase *tb)
     unsigned long freq;
 
     if (!first_ppc_cpu->env.tb_env) {
-        error_report("No timebase object");
+//        error_report("No timebase object");
         return;
     }
 
@@ -1107,6 +1144,7 @@ const VMStateDescription vmstate_ppc_timebase = {
         VMSTATE_END_OF_LIST()
     },
 };
+#endif
 
 /* Set up (once) timebase frequency (in Hz) */
 clk_setup_cb cpu_ppc_tb_init (CPUPPCState *env, uint32_t freq)
@@ -1171,6 +1209,7 @@ struct ppc40x_timer_t {
     unsigned int decr_excp;
 };
 
+#if 0
 /* Fixed interval timer */
 static void cpu_4xx_fit_cb (void *opaque)
 {
@@ -1214,10 +1253,12 @@ static void cpu_4xx_fit_cb (void *opaque)
            (int)((env->spr[SPR_40x_TCR] >> 23) & 0x1),
            env->spr[SPR_40x_TCR], env->spr[SPR_40x_TSR]);
 }
+#endif
 
 /* Programmable interval timer */
 static void start_stop_pit (CPUPPCState *env, ppc_tb_t *tb_env, int is_excp)
 {
+#if 0
     ppc40x_timer_t *ppc40x_timer;
     uint64_t now, next;
 
@@ -1241,8 +1282,10 @@ static void start_stop_pit (CPUPPCState *env, ppc_tb_t *tb_env, int is_excp)
         timer_mod(tb_env->decr_timer, next);
         tb_env->decr_next = next;
     }
+#endif
 }
 
+#if 0
 static void cpu_4xx_pit_cb (void *opaque)
 {
     PowerPCCPU *cpu;
@@ -1337,6 +1380,7 @@ static void cpu_4xx_wdt_cb (void *opaque)
         }
     }
 }
+#endif
 
 void store_40x_pit (CPUPPCState *env, target_ulong val)
 {
@@ -1370,6 +1414,7 @@ static void ppc_40x_set_tb_clk (void *opaque, uint32_t freq)
 clk_setup_cb ppc_40x_timers_init (CPUPPCState *env, uint32_t freq,
                                   unsigned int decr_excp)
 {
+#if 0
     ppc_tb_t *tb_env;
     ppc40x_timer_t *ppc40x_timer;
 
@@ -1390,6 +1435,7 @@ clk_setup_cb ppc_40x_timers_init (CPUPPCState *env, uint32_t freq,
             timer_new_ns(QEMU_CLOCK_VIRTUAL, &cpu_4xx_wdt_cb, env);
         ppc40x_timer->decr_excp = decr_excp;
     }
+#endif
 
     return &ppc_40x_set_tb_clk;
 }
@@ -1497,6 +1543,7 @@ int ppc_cpu_pir(PowerPCCPU *cpu)
     return env->spr_cb[SPR_PIR].default_value;
 }
 
+#if 0
 PowerPCCPU *ppc_get_vcpu_by_pir(int pir)
 {
     CPUState *cs;
@@ -1511,11 +1558,12 @@ PowerPCCPU *ppc_get_vcpu_by_pir(int pir)
 
     return NULL;
 }
+#endif
 
 void ppc_irq_reset(PowerPCCPU *cpu)
 {
     CPUPPCState *env = &cpu->env;
 
     env->irq_input_state = 0;
-    kvmppc_set_interrupt(cpu, PPC_INTERRUPT_EXT, 0);
+//    kvmppc_set_interrupt(cpu, PPC_INTERRUPT_EXT, 0);
 }

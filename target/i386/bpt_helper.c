@@ -23,7 +23,6 @@
 #include "exec/helper-proto.h"
 
 
-#ifndef CONFIG_USER_ONLY
 static inline bool hw_local_breakpoint_enabled(unsigned long dr7, int index)
 {
     return (dr7 >> (index * 2)) & 1;
@@ -192,7 +191,7 @@ static bool check_hw_breakpoints(CPUX86State *env, bool force_dr6_update)
             break;
         }
         if (bp_match || wp_match) {
-            dr6 |= 1 << reg;
+            dr6 |= 1ULL << reg;
             if (hw_breakpoint_enabled(env->dr[7], reg)) {
                 hit_enabled = true;
             }
@@ -233,14 +232,11 @@ void breakpoint_handler(CPUState *cs)
         }
     }
 }
-#endif
 
 void helper_single_step(CPUX86State *env)
 {
-#ifndef CONFIG_USER_ONLY
     check_hw_breakpoints(env, true);
     env->dr[6] |= DR6_BS;
-#endif
     raise_exception(env, EXCP01_DB);
 }
 
@@ -253,7 +249,6 @@ void helper_rechecking_single_step(CPUX86State *env)
 
 void helper_set_dr(CPUX86State *env, int reg, target_ulong t0)
 {
-#ifndef CONFIG_USER_ONLY
     switch (reg) {
     case 0: case 1: case 2: case 3:
         if (hw_breakpoint_enabled(env->dr[7], reg)
@@ -283,7 +278,6 @@ void helper_set_dr(CPUX86State *env, int reg, target_ulong t0)
         return;
     }
     raise_exception_err_ra(env, EXCP06_ILLOP, 0, GETPC());
-#endif
 }
 
 target_ulong helper_get_dr(CPUX86State *env, int reg)
@@ -311,7 +305,6 @@ target_ulong helper_get_dr(CPUX86State *env, int reg)
 void helper_bpt_io(CPUX86State *env, uint32_t port,
                    uint32_t size, target_ulong next_eip)
 {
-#ifndef CONFIG_USER_ONLY
     target_ulong dr7 = env->dr[7];
     int i, hit = 0;
 
@@ -331,5 +324,4 @@ void helper_bpt_io(CPUX86State *env, uint32_t port,
         env->eip = next_eip;
         raise_exception(env, EXCP01_DB);
     }
-#endif
 }

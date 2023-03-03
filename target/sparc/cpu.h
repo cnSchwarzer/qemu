@@ -476,7 +476,11 @@ struct CPUSPARCState {
     target_ulong regbase[MAX_NWINDOWS * 16 + 8];
 
     /* Fields up to this point are cleared by a CPU reset */
+#ifdef _MSC_VER
+    int end_reset_fields;
+#else
     struct {} end_reset_fields;
+#endif
 
     /* Fields from here on are preserved across CPU reset. */
     target_ulong version;
@@ -541,11 +545,14 @@ struct CPUSPARCState {
 #endif
     sparc_def_t def;
 
+    /* Leon3 cache control */
+    uint32_t cache_control;
+
     void *irq_manager;
     void (*qemu_irq_ack)(CPUSPARCState *env, void *irq_manager, int intno);
 
-    /* Leon3 cache control */
-    uint32_t cache_control;
+    // Unicorn engine
+    struct uc_struct *uc;
 };
 
 /**
@@ -561,23 +568,22 @@ struct SPARCCPU {
 
     CPUNegativeOffsetState neg;
     CPUSPARCState env;
+
+    struct SPARCCPUClass cc;
 };
 
 
-#ifndef CONFIG_USER_ONLY
-extern const VMStateDescription vmstate_sparc_cpu;
-#endif
-
 void sparc_cpu_do_interrupt(CPUState *cpu);
-void sparc_cpu_dump_state(CPUState *cpu, FILE *f, int flags);
 hwaddr sparc_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
-int sparc_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
-int sparc_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 void QEMU_NORETURN sparc_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
                                                  MMUAccessType access_type,
                                                  int mmu_idx,
                                                  uintptr_t retaddr);
+#ifdef _MSC_VER
+void cpu_raise_exception_ra(CPUSPARCState *, int, uintptr_t);
+#else
 void cpu_raise_exception_ra(CPUSPARCState *, int, uintptr_t) QEMU_NORETURN;
+#endif
 
 #ifndef NO_CPU_IO_DEFS
 /* cpu_init.c */
@@ -588,16 +594,15 @@ bool sparc_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                         MMUAccessType access_type, int mmu_idx,
                         bool probe, uintptr_t retaddr);
 target_ulong mmu_probe(CPUSPARCState *env, target_ulong address, int mmulev);
-void dump_mmu(CPUSPARCState *env);
 
-#if !defined(TARGET_SPARC64) && !defined(CONFIG_USER_ONLY)
+#if !defined(TARGET_SPARC64)
 int sparc_cpu_memory_rw_debug(CPUState *cpu, vaddr addr,
                               uint8_t *buf, int len, bool is_write);
 #endif
 
 
 /* translate.c */
-void sparc_tcg_init(void);
+void sparc_tcg_init(struct uc_struct *uc);
 
 /* cpu-exec.c */
 
@@ -620,11 +625,8 @@ void cpu_set_cwp(CPUSPARCState *env1, int new_cwp);
 /* int_helper.c */
 void leon3_irq_manager(CPUSPARCState *env, void *irq_manager, int intno);
 
-/* sun4m.c, sun4u.c */
-void cpu_check_irqs(CPUSPARCState *env);
-
 /* leon3.c */
-void leon3_irq_ack(void *irq_manager, int intno);
+// void leon3_irq_ack(void *irq_manager, int intno);
 
 #if defined (TARGET_SPARC64)
 
@@ -646,7 +648,6 @@ static inline int tlb_compare_context(const SparcTLBEntry *tlb,
 #endif
 
 /* cpu-exec.c */
-#if !defined(CONFIG_USER_ONLY)
 void sparc_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                      vaddr addr, unsigned size,
                                      MMUAccessType access_type,
@@ -656,7 +657,7 @@ void sparc_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
 hwaddr cpu_get_phys_page_nofault(CPUSPARCState *env, target_ulong addr,
                                            int mmu_idx);
 #endif
-#endif
+
 int cpu_sparc_signal_handler(int host_signum, void *pinfo, void *puc);
 
 #define SPARC_CPU_TYPE_SUFFIX "-" TYPE_SPARC_CPU
@@ -704,9 +705,7 @@ static inline int cpu_supervisor_mode(CPUSPARCState *env1)
 
 static inline int cpu_mmu_index(CPUSPARCState *env, bool ifetch)
 {
-#if defined(CONFIG_USER_ONLY)
-    return MMU_USER_IDX;
-#elif !defined(TARGET_SPARC64)
+#if !defined(TARGET_SPARC64)
     if ((env->mmuregs[0] & MMU_E) == 0) { /* MMU disabled */
         return MMU_PHYS_IDX;
     } else {
@@ -781,17 +780,10 @@ static inline void cpu_get_tb_cpu_state(CPUSPARCState *env, target_ulong *pc,
     *pc = env->pc;
     *cs_base = env->npc;
     flags = cpu_mmu_index(env, false);
-#ifndef CONFIG_USER_ONLY
     if (cpu_supervisor_mode(env)) {
         flags |= TB_FLAG_SUPER;
     }
-#endif
 #ifdef TARGET_SPARC64
-#ifndef CONFIG_USER_ONLY
-    if (cpu_hypervisor_mode(env)) {
-        flags |= TB_FLAG_HYPER;
-    }
-#endif
     if (env->pstate & PS_AM) {
         flags |= TB_FLAG_AM_ENABLED;
     }
@@ -811,11 +803,7 @@ static inline void cpu_get_tb_cpu_state(CPUSPARCState *env, target_ulong *pc,
 
 static inline bool tb_fpu_enabled(int tb_flags)
 {
-#if defined(CONFIG_USER_ONLY)
-    return true;
-#else
     return tb_flags & TB_FLAG_FPU_ENABLED;
-#endif
 }
 
 static inline bool tb_am_enabled(int tb_flags)
@@ -826,5 +814,7 @@ static inline bool tb_am_enabled(int tb_flags)
     return tb_flags & TB_FLAG_AM_ENABLED;
 #endif
 }
+
+SPARCCPU *cpu_sparc_init(struct uc_struct *uc);
 
 #endif

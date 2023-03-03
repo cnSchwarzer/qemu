@@ -1,10 +1,11 @@
+DEF_HELPER_4(uc_tracecode, void, i32, i32, ptr, i64)
+DEF_HELPER_6(uc_traceopcode, void, ptr, i64, i64, i32, ptr, i64)
+
 DEF_HELPER_3(raise_exception_err, noreturn, env, i32, int)
 DEF_HELPER_2(raise_exception, noreturn, env, i32)
 DEF_HELPER_1(raise_exception_debug, noreturn, env)
 
-#ifndef CONFIG_USER_ONLY
-DEF_HELPER_1(do_semihosting, void, env)
-#endif
+// DEF_HELPER_1(do_semihosting, void, env)
 
 #ifdef TARGET_MIPS64
 DEF_HELPER_4(sdl, void, env, tl, tl, int)
@@ -13,11 +14,9 @@ DEF_HELPER_4(sdr, void, env, tl, tl, int)
 DEF_HELPER_4(swl, void, env, tl, tl, int)
 DEF_HELPER_4(swr, void, env, tl, tl, int)
 
-#ifndef CONFIG_USER_ONLY
 DEF_HELPER_3(ll, tl, env, tl, int)
 #ifdef TARGET_MIPS64
 DEF_HELPER_3(lld, tl, env, tl, int)
-#endif
 #endif
 
 DEF_HELPER_3(muls, tl, env, tl, tl)
@@ -42,7 +41,6 @@ DEF_HELPER_FLAGS_1(dbitswap, TCG_CALL_NO_RWG_SE, tl, tl)
 
 DEF_HELPER_FLAGS_4(rotx, TCG_CALL_NO_RWG_SE, tl, tl, i32, i32, i32)
 
-#ifndef CONFIG_USER_ONLY
 /* CP0 helpers */
 DEF_HELPER_1(mfc0_mvpcontrol, tl, env)
 DEF_HELPER_1(mfc0_mvpconf0, tl, env)
@@ -198,7 +196,6 @@ DEF_HELPER_1(evpe, tl, env)
 /* R6 Multi-threading */
 DEF_HELPER_1(dvp, tl, env)
 DEF_HELPER_1(evp, tl, env)
-#endif /* !CONFIG_USER_ONLY */
 
 /* microMIPS functions */
 DEF_HELPER_4(lwm, void, env, tl, tl, i32)
@@ -365,7 +362,6 @@ FOP_PROTO(sne)
 #undef FOP_PROTO
 
 /* Special functions */
-#ifndef CONFIG_USER_ONLY
 DEF_HELPER_1(tlbwi, void, env)
 DEF_HELPER_1(tlbwr, void, env)
 DEF_HELPER_1(tlbp, void, env)
@@ -378,7 +374,6 @@ DEF_HELPER_1(eret, void, env)
 DEF_HELPER_1(eretnc, void, env)
 DEF_HELPER_1(deret, void, env)
 DEF_HELPER_3(ginvt, void, env, tl, i32)
-#endif /* !CONFIG_USER_ONLY */
 DEF_HELPER_1(rdhwr_cpunum, tl, env)
 DEF_HELPER_1(rdhwr_synci_step, tl, env)
 DEF_HELPER_1(rdhwr_cc, tl, env)

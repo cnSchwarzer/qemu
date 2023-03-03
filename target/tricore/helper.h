@@ -15,6 +15,15 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+   Modified for Unicorn Engine by Eric Poole <eric.poole@aptiv.com>, 2022
+   Copyright 2022 Aptiv 
+*/
+
+DEF_HELPER_4(uc_tracecode, void, i32, i32, ptr, i64)
+DEF_HELPER_6(uc_traceopcode, void, ptr, i64, i64, i32, ptr, i64)
+DEF_HELPER_1(uc_tricore_exit,void, env)
+
 /* Arithmetic */
 DEF_HELPER_3(add_ssov, i32, env, i32, i32)
 DEF_HELPER_3(add64_ssov, i64, env, i64, i64)
@@ -153,4 +162,3 @@ DEF_HELPER_2(psw_write, void, env, i32)
 DEF_HELPER_1(psw_read, i32, env)
 /* Exceptions */
 DEF_HELPER_3(raise_exception_sync, noreturn, env, i32, i32)
-DEF_HELPER_2(qemu_excp, noreturn, env, i32)

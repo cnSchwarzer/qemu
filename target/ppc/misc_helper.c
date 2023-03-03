@@ -21,8 +21,6 @@
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "exec/helper-proto.h"
-#include "qemu/error-report.h"
-#include "qemu/main-loop.h"
 
 #include "helper_regs.h"
 
@@ -30,14 +28,18 @@
 /* SPR accesses */
 void helper_load_dump_spr(CPUPPCState *env, uint32_t sprn)
 {
+#if 0
     qemu_log("Read SPR %d %03x => " TARGET_FMT_lx "\n", sprn, sprn,
              env->spr[sprn]);
+#endif
 }
 
 void helper_store_dump_spr(CPUPPCState *env, uint32_t sprn)
 {
+#if 0
     qemu_log("Write SPR %d %03x <= " TARGET_FMT_lx "\n", sprn, sprn,
              env->spr[sprn]);
+#endif
 }
 
 #ifdef TARGET_PPC64
@@ -57,7 +59,7 @@ static void raise_fu_exception(CPUPPCState *env, uint32_t bit,
                                uint32_t sprn, uint32_t cause,
                                uintptr_t raddr)
 {
-    qemu_log("Facility SPR %d is unavailable (SPR FSCR:%d)\n", sprn, bit);
+    // qemu_log("Facility SPR %d is unavailable (SPR FSCR:%d)\n", sprn, bit);
 
     env->spr[SPR_FSCR] &= ~((target_ulong)FSCR_IC_MASK << FSCR_IC_POS);
     cause &= FSCR_IC_MASK;
@@ -72,7 +74,7 @@ void helper_hfscr_facility_check(CPUPPCState *env, uint32_t bit,
 {
 #ifdef TARGET_PPC64
     if ((env->msr_mask & MSR_HVB) && !msr_hv &&
-                                     !(env->spr[SPR_HFSCR] & (1UL << bit))) {
+                                     !(env->spr[SPR_HFSCR] & (1ULL << bit))) {
         raise_hv_fu_exception(env, bit, caller, cause, GETPC());
     }
 #endif
@@ -101,8 +103,6 @@ void helper_msr_facility_check(CPUPPCState *env, uint32_t bit,
     raise_fu_exception(env, bit, sprn, cause, GETPC());
 #endif
 }
-
-#if !defined(CONFIG_USER_ONLY)
 
 void helper_store_sdr1(CPUPPCState *env, target_ulong val)
 {
@@ -200,8 +200,8 @@ void helper_store_hid0_601(CPUPPCState *env, target_ulong val)
         env->hflags_nmsr &= ~(1 << MSR_LE);
         env->hflags_nmsr |= (1 << MSR_LE) & (((val >> 3) & 1) << MSR_LE);
         env->hflags |= env->hflags_nmsr;
-        qemu_log("%s: set endianness to %c => " TARGET_FMT_lx "\n", __func__,
-                 val & 0x8 ? 'l' : 'b', env->hflags);
+        // qemu_log("%s: set endianness to %c => " TARGET_FMT_lx "\n", __func__,
+        //          val & 0x8 ? 'l' : 'b', env->hflags);
     }
     env->spr[SPR_HID0] = (uint32_t)val;
 }
@@ -224,7 +224,7 @@ void helper_store_40x_sler(CPUPPCState *env, target_ulong val)
 {
     store_40x_sler(env, val);
 }
-#endif
+
 /*****************************************************************************/
 /* PowerPC 601 specific instructions (POWER bridge) */
 

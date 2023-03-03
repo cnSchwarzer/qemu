@@ -34,9 +34,9 @@
  * bitmap_intersects(src1, src2, nbits)         Do *src1 and *src2 overlap?
  * bitmap_empty(src, nbits)			Are all bits zero in *src?
  * bitmap_full(src, nbits)			Are all bits set in *src?
- * bitmap_set(dst, pos, nbits)			Set specified bit area
+ * qemu_bitmap_set(dst, pos, nbits)			Set specified bit area
  * bitmap_set_atomic(dst, pos, nbits)   Set specified bit area with atomic ops
- * bitmap_clear(dst, pos, nbits)		Clear specified bit area
+ * qemu_bitmap_clear(dst, pos, nbits)		Clear specified bit area
  * bitmap_test_and_clear_atomic(dst, pos, nbits)    Test and clear area
  * bitmap_find_next_zero_area(buf, len, pos, n, mask)	Find bit free area
  * bitmap_to_le(dst, src, nbits)      Convert bitmap to little endian
@@ -225,7 +225,7 @@ static inline int bitmap_intersects(const unsigned long *src1,
 
 static inline long bitmap_count_one(const unsigned long *bitmap, long nbits)
 {
-    if (unlikely(!nbits)) {
+    if (!nbits) {
         return 0;
     }
 
@@ -249,9 +249,9 @@ static inline long bitmap_count_one_with_offset(const unsigned long *bitmap,
            bitmap_count_one(bitmap_start, redundant_bits);
 }
 
-void bitmap_set(unsigned long *map, long i, long len);
+void qemu_bitmap_set(unsigned long *map, long i, long len);
 void bitmap_set_atomic(unsigned long *map, long i, long len);
-void bitmap_clear(unsigned long *map, long start, long nr);
+void qemu_bitmap_clear(unsigned long *map, long start, long nr);
 bool bitmap_test_and_clear_atomic(unsigned long *map, long start, long nr);
 void bitmap_copy_and_clear_atomic(unsigned long *dst, unsigned long *src,
                                   long nr);
@@ -266,7 +266,7 @@ static inline unsigned long *bitmap_zero_extend(unsigned long *old,
 {
     long new_len = BITS_TO_LONGS(new_nbits) * sizeof(unsigned long);
     unsigned long *new = g_realloc(old, new_len);
-    bitmap_clear(new, old_nbits, new_nbits - old_nbits);
+    qemu_bitmap_clear(new, old_nbits, new_nbits - old_nbits);
     return new;
 }
 

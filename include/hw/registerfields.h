@@ -63,38 +63,34 @@
  * Assigning values larger then the target field will result in
  * compilation warnings.
  */
-#define FIELD_DP8(storage, reg, field, val) ({                            \
+#define FIELD_DP8(storage, reg, field, val, d) {                          \
     struct {                                                              \
         unsigned int v:R_ ## reg ## _ ## field ## _LENGTH;                \
     } v = { .v = val };                                                   \
-    uint8_t d;                                                            \
     d = deposit32((storage), R_ ## reg ## _ ## field ## _SHIFT,           \
                   R_ ## reg ## _ ## field ## _LENGTH, v.v);               \
-    d; })
-#define FIELD_DP16(storage, reg, field, val) ({                           \
+    }
+#define FIELD_DP16(storage, reg, field, val, d) {                         \
     struct {                                                              \
         unsigned int v:R_ ## reg ## _ ## field ## _LENGTH;                \
     } v = { .v = val };                                                   \
-    uint16_t d;                                                           \
     d = deposit32((storage), R_ ## reg ## _ ## field ## _SHIFT,           \
                   R_ ## reg ## _ ## field ## _LENGTH, v.v);               \
-    d; })
-#define FIELD_DP32(storage, reg, field, val) ({                           \
+    }
+#define FIELD_DP32(storage, reg, field, val, d) {                         \
     struct {                                                              \
         unsigned int v:R_ ## reg ## _ ## field ## _LENGTH;                \
     } v = { .v = val };                                                   \
-    uint32_t d;                                                           \
     d = deposit32((storage), R_ ## reg ## _ ## field ## _SHIFT,           \
                   R_ ## reg ## _ ## field ## _LENGTH, v.v);               \
-    d; })
-#define FIELD_DP64(storage, reg, field, val) ({                           \
+    }
+#define FIELD_DP64(storage, reg, field, val, d) {                         \
     struct {                                                              \
         unsigned int v:R_ ## reg ## _ ## field ## _LENGTH;                \
     } v = { .v = val };                                                   \
-    uint64_t d;                                                           \
     d = deposit64((storage), R_ ## reg ## _ ## field ## _SHIFT,           \
                   R_ ## reg ## _ ## field ## _LENGTH, v.v);               \
-    d; })
+    }
 
 /* Deposit a field to array of registers.  */
 #define ARRAY_FIELD_DP32(regs, reg, field, val)                           \

@@ -18,17 +18,10 @@
  */
 
 #include "qemu/osdep.h"
-#include "qapi/error.h"
 #include "cpu.h"
-#include "qemu/module.h"
-#include "qemu/qemu-print.h"
 #include "exec/exec-all.h"
-#include "hw/qdev-properties.h"
-#include "qapi/visitor.h"
 
-//#define DEBUG_FEATURES
-
-static void sparc_cpu_reset(DeviceState *dev)
+static void sparc_cpu_reset(CPUState *dev)
 {
     CPUState *s = CPU(dev);
     SPARCCPU *cpu = SPARC_CPU(s);
@@ -44,14 +37,6 @@ static void sparc_cpu_reset(DeviceState *dev)
 #endif
     env->regwptr = env->regbase + (env->cwp * 16);
     CC_OP = CC_OP_FLAGS;
-#if defined(CONFIG_USER_ONLY)
-#ifdef TARGET_SPARC64
-    env->cleanwin = env->nwindows - 2;
-    env->cansave = env->nwindows - 2;
-    env->pstate = PS_RMO | PS_PEF | PS_IE;
-    env->asi = 0x82; /* Primary no-fault */
-#endif
-#else
 #if !defined(TARGET_SPARC64)
     env->psret = 0;
     env->psrs = 1;
@@ -73,7 +58,6 @@ static void sparc_cpu_reset(DeviceState *dev)
 #endif
     env->pc = 0;
     env->npc = env->pc + 4;
-#endif
     env->cache_control = 0;
 }
 
@@ -95,103 +79,6 @@ static bool sparc_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         }
     }
     return false;
-}
-
-static void cpu_sparc_disas_set_info(CPUState *cpu, disassemble_info *info)
-{
-    info->print_insn = print_insn_sparc;
-#ifdef TARGET_SPARC64
-    info->mach = bfd_mach_sparc_v9b;
-#endif
-}
-
-static void
-cpu_add_feat_as_prop(const char *typename, const char *name, const char *val)
-{
-    GlobalProperty *prop = g_new0(typeof(*prop), 1);
-    prop->driver = typename;
-    prop->property = g_strdup(name);
-    prop->value = g_strdup(val);
-    qdev_prop_register_global(prop);
-}
-
-/* Parse "+feature,-feature,feature=foo" CPU feature string */
-static void sparc_cpu_parse_features(const char *typename, char *features,
-                                     Error **errp)
-{
-    GList *l, *plus_features = NULL, *minus_features = NULL;
-    char *featurestr; /* Single 'key=value" string being parsed */
-    static bool cpu_globals_initialized;
-
-    if (cpu_globals_initialized) {
-        return;
-    }
-    cpu_globals_initialized = true;
-
-    if (!features) {
-        return;
-    }
-
-    for (featurestr = strtok(features, ",");
-         featurestr;
-         featurestr = strtok(NULL, ",")) {
-        const char *name;
-        const char *val = NULL;
-        char *eq = NULL;
-
-        /* Compatibility syntax: */
-        if (featurestr[0] == '+') {
-            plus_features = g_list_append(plus_features,
-                                          g_strdup(featurestr + 1));
-            continue;
-        } else if (featurestr[0] == '-') {
-            minus_features = g_list_append(minus_features,
-                                           g_strdup(featurestr + 1));
-            continue;
-        }
-
-        eq = strchr(featurestr, '=');
-        name = featurestr;
-        if (eq) {
-            *eq++ = 0;
-            val = eq;
-
-            /*
-             * Temporarily, only +feat/-feat will be supported
-             * for boolean properties until we remove the
-             * minus-overrides-plus semantics and just follow
-             * the order options appear on the command-line.
-             *
-             * TODO: warn if user is relying on minus-override-plus semantics
-             * TODO: remove minus-override-plus semantics after
-             *       warning for a few releases
-             */
-            if (!strcasecmp(val, "on") ||
-                !strcasecmp(val, "off") ||
-                !strcasecmp(val, "true") ||
-                !strcasecmp(val, "false")) {
-                error_setg(errp, "Boolean properties in format %s=%s"
-                                 " are not supported", name, val);
-                return;
-            }
-        } else {
-            error_setg(errp, "Unsupported property format: %s", name);
-            return;
-        }
-        cpu_add_feat_as_prop(typename, name, val);
-    }
-
-    for (l = plus_features; l; l = l->next) {
-        const char *name = l->data;
-        cpu_add_feat_as_prop(typename, name, "on");
-    }
-    g_list_free_full(plus_features, g_free);
-
-    for (l = minus_features; l; l = l->next) {
-        const char *name = l->data;
-        cpu_add_feat_as_prop(typename, name, "off");
-    }
-    g_list_free_full(minus_features, g_free);
 }
 
 void cpu_sparc_set_id(CPUSPARCState *env, unsigned int cpu)
@@ -540,149 +427,6 @@ static const sparc_def_t sparc_defs[] = {
 #endif
 };
 
-static const char * const feature_name[] = {
-    "float",
-    "float128",
-    "swap",
-    "mul",
-    "div",
-    "flush",
-    "fsqrt",
-    "fmul",
-    "vis1",
-    "vis2",
-    "fsmuld",
-    "hypv",
-    "cmt",
-    "gl",
-};
-
-static void print_features(uint32_t features, const char *prefix)
-{
-    unsigned int i;
-
-    for (i = 0; i < ARRAY_SIZE(feature_name); i++) {
-        if (feature_name[i] && (features & (1 << i))) {
-            if (prefix) {
-                qemu_printf("%s", prefix);
-            }
-            qemu_printf("%s ", feature_name[i]);
-        }
-    }
-}
-
-void sparc_cpu_list(void)
-{
-    unsigned int i;
-
-    for (i = 0; i < ARRAY_SIZE(sparc_defs); i++) {
-        qemu_printf("Sparc %16s IU " TARGET_FMT_lx
-                    " FPU %08x MMU %08x NWINS %d ",
-                    sparc_defs[i].name,
-                    sparc_defs[i].iu_version,
-                    sparc_defs[i].fpu_version,
-                    sparc_defs[i].mmu_version,
-                    sparc_defs[i].nwindows);
-        print_features(CPU_DEFAULT_FEATURES & ~sparc_defs[i].features, "-");
-        print_features(~CPU_DEFAULT_FEATURES & sparc_defs[i].features, "+");
-        qemu_printf("\n");
-    }
-    qemu_printf("Default CPU feature flags (use '-' to remove): ");
-    print_features(CPU_DEFAULT_FEATURES, NULL);
-    qemu_printf("\n");
-    qemu_printf("Available CPU feature flags (use '+' to add): ");
-    print_features(~CPU_DEFAULT_FEATURES, NULL);
-    qemu_printf("\n");
-    qemu_printf("Numerical features (use '=' to set): iu_version "
-                "fpu_version mmu_version nwindows\n");
-}
-
-static void cpu_print_cc(FILE *f, uint32_t cc)
-{
-    qemu_fprintf(f, "%c%c%c%c", cc & PSR_NEG ? 'N' : '-',
-                 cc & PSR_ZERO ? 'Z' : '-', cc & PSR_OVF ? 'V' : '-',
-                 cc & PSR_CARRY ? 'C' : '-');
-}
-
-#ifdef TARGET_SPARC64
-#define REGS_PER_LINE 4
-#else
-#define REGS_PER_LINE 8
-#endif
-
-void sparc_cpu_dump_state(CPUState *cs, FILE *f, int flags)
-{
-    SPARCCPU *cpu = SPARC_CPU(cs);
-    CPUSPARCState *env = &cpu->env;
-    int i, x;
-
-    qemu_fprintf(f, "pc: " TARGET_FMT_lx "  npc: " TARGET_FMT_lx "\n", env->pc,
-                 env->npc);
-
-    for (i = 0; i < 8; i++) {
-        if (i % REGS_PER_LINE == 0) {
-            qemu_fprintf(f, "%%g%d-%d:", i, i + REGS_PER_LINE - 1);
-        }
-        qemu_fprintf(f, " " TARGET_FMT_lx, env->gregs[i]);
-        if (i % REGS_PER_LINE == REGS_PER_LINE - 1) {
-            qemu_fprintf(f, "\n");
-        }
-    }
-    for (x = 0; x < 3; x++) {
-        for (i = 0; i < 8; i++) {
-            if (i % REGS_PER_LINE == 0) {
-                qemu_fprintf(f, "%%%c%d-%d: ",
-                             x == 0 ? 'o' : (x == 1 ? 'l' : 'i'),
-                             i, i + REGS_PER_LINE - 1);
-            }
-            qemu_fprintf(f, TARGET_FMT_lx " ", env->regwptr[i + x * 8]);
-            if (i % REGS_PER_LINE == REGS_PER_LINE - 1) {
-                qemu_fprintf(f, "\n");
-            }
-        }
-    }
-
-    if (flags & CPU_DUMP_FPU) {
-        for (i = 0; i < TARGET_DPREGS; i++) {
-            if ((i & 3) == 0) {
-                qemu_fprintf(f, "%%f%02d: ", i * 2);
-            }
-            qemu_fprintf(f, " %016" PRIx64, env->fpr[i].ll);
-            if ((i & 3) == 3) {
-                qemu_fprintf(f, "\n");
-            }
-        }
-    }
-
-#ifdef TARGET_SPARC64
-    qemu_fprintf(f, "pstate: %08x ccr: %02x (icc: ", env->pstate,
-                 (unsigned)cpu_get_ccr(env));
-    cpu_print_cc(f, cpu_get_ccr(env) << PSR_CARRY_SHIFT);
-    qemu_fprintf(f, " xcc: ");
-    cpu_print_cc(f, cpu_get_ccr(env) << (PSR_CARRY_SHIFT - 4));
-    qemu_fprintf(f, ") asi: %02x tl: %d pil: %x gl: %d\n", env->asi, env->tl,
-                 env->psrpil, env->gl);
-    qemu_fprintf(f, "tbr: " TARGET_FMT_lx " hpstate: " TARGET_FMT_lx " htba: "
-                 TARGET_FMT_lx "\n", env->tbr, env->hpstate, env->htba);
-    qemu_fprintf(f, "cansave: %d canrestore: %d otherwin: %d wstate: %d "
-                 "cleanwin: %d cwp: %d\n",
-                 env->cansave, env->canrestore, env->otherwin, env->wstate,
-                 env->cleanwin, env->nwindows - 1 - env->cwp);
-    qemu_fprintf(f, "fsr: " TARGET_FMT_lx " y: " TARGET_FMT_lx " fprs: "
-                 TARGET_FMT_lx "\n", env->fsr, env->y, env->fprs);
-
-#else
-    qemu_fprintf(f, "psr: %08x (icc: ", cpu_get_psr(env));
-    cpu_print_cc(f, cpu_get_psr(env));
-    qemu_fprintf(f, " SPE: %c%c%c) wim: %08x\n", env->psrs ? 'S' : '-',
-                 env->psrps ? 'P' : '-', env->psret ? 'E' : '-',
-                 env->wim);
-    qemu_fprintf(f, "fsr: " TARGET_FMT_lx " y: " TARGET_FMT_lx "\n",
-                 env->fsr, env->y);
-#endif
-    qemu_fprintf(f, "\n");
-}
-
 static void sparc_cpu_set_pc(CPUState *cs, vaddr value)
 {
     SPARCCPU *cpu = SPARC_CPU(cs);
@@ -708,45 +452,11 @@ static bool sparc_cpu_has_work(CPUState *cs)
            cpu_interrupts_enabled(env);
 }
 
-static char *sparc_cpu_type_name(const char *cpu_model)
-{
-    char *name = g_strdup_printf(SPARC_CPU_TYPE_NAME("%s"), cpu_model);
-    char *s = name;
-
-    /* SPARC cpu model names happen to have whitespaces,
-     * as type names shouldn't have spaces replace them with '-'
-     */
-    while ((s = strchr(s, ' '))) {
-        *s = '-';
-    }
-
-    return name;
-}
-
-static ObjectClass *sparc_cpu_class_by_name(const char *cpu_model)
-{
-    ObjectClass *oc;
-    char *typename;
-
-    typename = sparc_cpu_type_name(cpu_model);
-    oc = object_class_by_name(typename);
-    g_free(typename);
-    return oc;
-}
-
-static void sparc_cpu_realizefn(DeviceState *dev, Error **errp)
+static void sparc_cpu_realizefn(struct uc_struct *uc, CPUState *dev)
 {
     CPUState *cs = CPU(dev);
-    SPARCCPUClass *scc = SPARC_CPU_GET_CLASS(dev);
-    Error *local_err = NULL;
     SPARCCPU *cpu = SPARC_CPU(dev);
     CPUSPARCState *env = &cpu->env;
-
-#if defined(CONFIG_USER_ONLY)
-    if ((env->def.features & CPU_FEATURE_FLOAT)) {
-        env->def.features |= CPU_FEATURE_FLOAT128;
-    }
-#endif
 
     env->version = env->def.iu_version;
     env->fsr = env->def.fpu_version;
@@ -762,22 +472,16 @@ static void sparc_cpu_realizefn(DeviceState *dev, Error **errp)
     env->version |= env->def.nwindows - 1;
 #endif
 
-    cpu_exec_realizefn(cs, &local_err);
-    if (local_err != NULL) {
-        error_propagate(errp, local_err);
-        return;
-    }
-
-    qemu_init_vcpu(cs);
-
-    scc->parent_realize(dev, errp);
+    cpu_exec_realizefn(cs);
 }
 
-static void sparc_cpu_initfn(Object *obj)
+static void sparc_cpu_initfn(struct uc_struct *uc, CPUState *obj)
 {
     SPARCCPU *cpu = SPARC_CPU(obj);
     SPARCCPUClass *scc = SPARC_CPU_GET_CLASS(obj);
     CPUSPARCState *env = &cpu->env;
+
+    env->uc = uc;
 
     cpu_set_cpustate_pointers(cpu);
 
@@ -786,149 +490,76 @@ static void sparc_cpu_initfn(Object *obj)
     }
 }
 
-static void sparc_get_nwindows(Object *obj, Visitor *v, const char *name,
-                               void *opaque, Error **errp)
-{
-    SPARCCPU *cpu = SPARC_CPU(obj);
-    int64_t value = cpu->env.def.nwindows;
-
-    visit_type_int(v, name, &value, errp);
-}
-
-static void sparc_set_nwindows(Object *obj, Visitor *v, const char *name,
-                               void *opaque, Error **errp)
-{
-    const int64_t min = MIN_NWINDOWS;
-    const int64_t max = MAX_NWINDOWS;
-    SPARCCPU *cpu = SPARC_CPU(obj);
-    Error *err = NULL;
-    int64_t value;
-
-    visit_type_int(v, name, &value, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
-    }
-
-    if (value < min || value > max) {
-        error_setg(errp, "Property %s.%s doesn't take value %" PRId64
-                   " (minimum: %" PRId64 ", maximum: %" PRId64 ")",
-                   object_get_typename(obj), name ? name : "null",
-                   value, min, max);
-        return;
-    }
-    cpu->env.def.nwindows = value;
-}
-
-static PropertyInfo qdev_prop_nwindows = {
-    .name  = "int",
-    .get   = sparc_get_nwindows,
-    .set   = sparc_set_nwindows,
-};
-
-static Property sparc_cpu_properties[] = {
-    DEFINE_PROP_BIT("float",    SPARCCPU, env.def.features, 0, false),
-    DEFINE_PROP_BIT("float128", SPARCCPU, env.def.features, 1, false),
-    DEFINE_PROP_BIT("swap",     SPARCCPU, env.def.features, 2, false),
-    DEFINE_PROP_BIT("mul",      SPARCCPU, env.def.features, 3, false),
-    DEFINE_PROP_BIT("div",      SPARCCPU, env.def.features, 4, false),
-    DEFINE_PROP_BIT("flush",    SPARCCPU, env.def.features, 5, false),
-    DEFINE_PROP_BIT("fsqrt",    SPARCCPU, env.def.features, 6, false),
-    DEFINE_PROP_BIT("fmul",     SPARCCPU, env.def.features, 7, false),
-    DEFINE_PROP_BIT("vis1",     SPARCCPU, env.def.features, 8, false),
-    DEFINE_PROP_BIT("vis2",     SPARCCPU, env.def.features, 9, false),
-    DEFINE_PROP_BIT("fsmuld",   SPARCCPU, env.def.features, 10, false),
-    DEFINE_PROP_BIT("hypv",     SPARCCPU, env.def.features, 11, false),
-    DEFINE_PROP_BIT("cmt",      SPARCCPU, env.def.features, 12, false),
-    DEFINE_PROP_BIT("gl",       SPARCCPU, env.def.features, 13, false),
-    DEFINE_PROP_UNSIGNED("iu-version", SPARCCPU, env.def.iu_version, 0,
-                         qdev_prop_uint64, target_ulong),
-    DEFINE_PROP_UINT32("fpu-version", SPARCCPU, env.def.fpu_version, 0),
-    DEFINE_PROP_UINT32("mmu-version", SPARCCPU, env.def.mmu_version, 0),
-    { .name  = "nwindows", .info  = &qdev_prop_nwindows },
-    DEFINE_PROP_END_OF_LIST()
-};
-
-static void sparc_cpu_class_init(ObjectClass *oc, void *data)
+static void sparc_cpu_class_init(struct uc_struct *uc, CPUClass *oc)
 {
     SPARCCPUClass *scc = SPARC_CPU_CLASS(oc);
     CPUClass *cc = CPU_CLASS(oc);
-    DeviceClass *dc = DEVICE_CLASS(oc);
 
-    device_class_set_parent_realize(dc, sparc_cpu_realizefn,
-                                    &scc->parent_realize);
-    device_class_set_props(dc, sparc_cpu_properties);
-
-    device_class_set_parent_reset(dc, sparc_cpu_reset, &scc->parent_reset);
-
-    cc->class_by_name = sparc_cpu_class_by_name;
-    cc->parse_features = sparc_cpu_parse_features;
+    /* parent class is CPUClass, parent_reset() is cpu_common_reset(). */
+    scc->parent_reset = cc->reset;
+    /* overwrite the CPUClass->reset to arch reset: x86_cpu_reset(). */
+    cc->reset = sparc_cpu_reset;
     cc->has_work = sparc_cpu_has_work;
     cc->do_interrupt = sparc_cpu_do_interrupt;
     cc->cpu_exec_interrupt = sparc_cpu_exec_interrupt;
-    cc->dump_state = sparc_cpu_dump_state;
-#if !defined(TARGET_SPARC64) && !defined(CONFIG_USER_ONLY)
-    cc->memory_rw_debug = sparc_cpu_memory_rw_debug;
-#endif
     cc->set_pc = sparc_cpu_set_pc;
     cc->synchronize_from_tb = sparc_cpu_synchronize_from_tb;
-    cc->gdb_read_register = sparc_cpu_gdb_read_register;
-    cc->gdb_write_register = sparc_cpu_gdb_write_register;
     cc->tlb_fill = sparc_cpu_tlb_fill;
-#ifndef CONFIG_USER_ONLY
-    cc->do_transaction_failed = sparc_cpu_do_transaction_failed;
     cc->do_unaligned_access = sparc_cpu_do_unaligned_access;
     cc->get_phys_page_debug = sparc_cpu_get_phys_page_debug;
-    cc->vmsd = &vmstate_sparc_cpu;
-#endif
-    cc->disas_set_info = cpu_sparc_disas_set_info;
     cc->tcg_initialize = sparc_tcg_init;
-
-#if defined(TARGET_SPARC64) && !defined(TARGET_ABI32)
-    cc->gdb_num_core_regs = 86;
-#else
-    cc->gdb_num_core_regs = 72;
-#endif
 }
 
-static const TypeInfo sparc_cpu_type_info = {
-    .name = TYPE_SPARC_CPU,
-    .parent = TYPE_CPU,
-    .instance_size = sizeof(SPARCCPU),
-    .instance_init = sparc_cpu_initfn,
-    .abstract = true,
-    .class_size = sizeof(SPARCCPUClass),
-    .class_init = sparc_cpu_class_init,
-};
-
-static void sparc_cpu_cpudef_class_init(ObjectClass *oc, void *data)
+SPARCCPU *cpu_sparc_init(struct uc_struct *uc)
 {
-    SPARCCPUClass *scc = SPARC_CPU_CLASS(oc);
-    scc->cpu_def = data;
-}
+    SPARCCPU *cpu;
+    CPUState *cs;
+    CPUClass *cc;
+    SPARCCPUClass *scc;
 
-static void sparc_register_cpudef_type(const struct sparc_def_t *def)
-{
-    char *typename = sparc_cpu_type_name(def->name);
-    TypeInfo ti = {
-        .name = typename,
-        .parent = TYPE_SPARC_CPU,
-        .class_init = sparc_cpu_cpudef_class_init,
-        .class_data = (void *)def,
-    };
-
-    type_register(&ti);
-    g_free(typename);
-}
-
-static void sparc_cpu_register_types(void)
-{
-    int i;
-
-    type_register_static(&sparc_cpu_type_info);
-    for (i = 0; i < ARRAY_SIZE(sparc_defs); i++) {
-        sparc_register_cpudef_type(&sparc_defs[i]);
+    cpu = malloc(sizeof(*cpu));
+    if (cpu == NULL) {
+        return NULL;
     }
-}
+    memset(cpu, 0, sizeof(*cpu));
 
-type_init(sparc_cpu_register_types)
+    if (uc->cpu_model == INT_MAX) {
+#ifdef TARGET_SPARC64
+        uc->cpu_model = UC_CPU_SPARC64_SUN_ULTRASPARC_IV; // Sun UltraSparc IV
+#else
+        uc->cpu_model = UC_CPU_SPARC32_LEON3; // Leon 3
+#endif
+    } else if (uc->cpu_model >= ARRAY_SIZE(sparc_defs)) {
+        free(cpu);
+        return NULL;
+    }
+
+    cs = (CPUState *)cpu;
+    cc = (CPUClass *)&cpu->cc;
+    cs->cc = cc;
+    cs->uc = uc;
+    uc->cpu = cs;
+
+    /* init CPUClass */
+    cpu_class_init(uc, cc);
+    /* init SPARCCPUClass */
+    sparc_cpu_class_init(uc, cc);
+    /* init CPUState */
+    cpu_common_initfn(uc, cs);
+    /* init SPARC types scc->def */
+    scc = SPARC_CPU_CLASS(cc);
+    scc->cpu_def = &sparc_defs[uc->cpu_model];
+
+    /* init SPARCCPU */
+    sparc_cpu_initfn(uc, cs);
+    /* realize SPARCCPU */
+    sparc_cpu_realizefn(uc, cs);
+    /* realize CPUState */
+
+    // init address space
+    cpu_address_space_init(cs, 0, cs->memory);
+
+    qemu_init_vcpu(cs);
+
+    return cpu;
+}

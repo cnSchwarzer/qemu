@@ -1653,6 +1653,9 @@ static void tcg_out_tlb_read(TCGContext *s, TCGReg addr_reg, MemOp opc,
                              tcg_insn_unit **label_ptr, int mem_index,
                              bool is_read)
 {
+#ifdef TARGET_ARM
+    struct uc_struct *uc = s->uc;
+#endif
     unsigned a_bits = get_alignment_bits(opc);
     unsigned s_bits = opc & MO_SIZE;
     unsigned a_mask = (1u << a_bits) - 1;
@@ -1859,7 +1862,7 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
 {
     /* 99% of the time, we can signal the use of extension registers
        by looking to see if the opcode handles 64-bit data.  */
-    TCGType ext = (tcg_op_defs[opc].flags & TCG_OPF_64BIT) != 0;
+    TCGType ext = (s->tcg_op_defs[opc].flags & TCG_OPF_64BIT) != 0;
 
     /* Hoist the loads of the most common arguments.  */
     TCGArg a0 = args[0];
@@ -2474,7 +2477,7 @@ static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
     }
 }
 
-int tcg_can_emit_vec_op(TCGOpcode opc, TCGType type, unsigned vece)
+int tcg_can_emit_vec_op(TCGContext *tcg_ctx, TCGOpcode opc, TCGType type, unsigned vece)
 {
     switch (opc) {
     case INDEX_op_add_vec:
@@ -2513,28 +2516,28 @@ int tcg_can_emit_vec_op(TCGOpcode opc, TCGType type, unsigned vece)
     }
 }
 
-void tcg_expand_vec_op(TCGOpcode opc, TCGType type, unsigned vece,
+void tcg_expand_vec_op(TCGContext *tcg_ctx, TCGOpcode opc, TCGType type, unsigned vece,
                        TCGArg a0, ...)
 {
     va_list va;
     TCGv_vec v0, v1, v2, t1;
 
     va_start(va, a0);
-    v0 = temp_tcgv_vec(arg_temp(a0));
-    v1 = temp_tcgv_vec(arg_temp(va_arg(va, TCGArg)));
-    v2 = temp_tcgv_vec(arg_temp(va_arg(va, TCGArg)));
+    v0 = temp_tcgv_vec(tcg_ctx, arg_temp(a0));
+    v1 = temp_tcgv_vec(tcg_ctx, arg_temp(va_arg(va, TCGArg)));
+    v2 = temp_tcgv_vec(tcg_ctx, arg_temp(va_arg(va, TCGArg)));
 
     switch (opc) {
     case INDEX_op_shrv_vec:
     case INDEX_op_sarv_vec:
         /* Right shifts are negative left shifts for AArch64.  */
-        t1 = tcg_temp_new_vec(type);
-        tcg_gen_neg_vec(vece, t1, v2);
+        t1 = tcg_temp_new_vec(tcg_ctx, type);
+        tcg_gen_neg_vec(tcg_ctx, vece, t1, v2);
         opc = (opc == INDEX_op_shrv_vec
                ? INDEX_op_shlv_vec : INDEX_op_aa64_sshl_vec);
-        vec_gen_3(opc, type, vece, tcgv_vec_arg(v0),
-                  tcgv_vec_arg(v1), tcgv_vec_arg(t1));
-        tcg_temp_free_vec(t1);
+        vec_gen_3(tcg_ctx, opc, type, vece, tcgv_vec_arg(tcg_ctx, v0),
+                  tcgv_vec_arg(tcg_ctx, v1), tcgv_vec_arg(tcg_ctx, t1));
+        tcg_temp_free_vec(tcg_ctx, t1);
         break;
 
     default:
@@ -2759,31 +2762,31 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
 
 static void tcg_target_init(TCGContext *s)
 {
-    tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffffu;
-    tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffffu;
-    tcg_target_available_regs[TCG_TYPE_V64] = 0xffffffff00000000ull;
-    tcg_target_available_regs[TCG_TYPE_V128] = 0xffffffff00000000ull;
+    s->tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffffu;
+    s->tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffffu;
+    s->tcg_target_available_regs[TCG_TYPE_V64] = 0xffffffff00000000ull;
+    s->tcg_target_available_regs[TCG_TYPE_V128] = 0xffffffff00000000ull;
 
-    tcg_target_call_clobber_regs = -1ull;
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X19);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X20);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X21);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X22);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X23);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X24);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X25);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X26);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X27);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X28);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X29);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V8);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V9);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V10);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V11);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V12);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V13);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V14);
-    tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_V15);
+    s->tcg_target_call_clobber_regs = -1ull;
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X19);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X20);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X21);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X22);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X23);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X24);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X25);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X26);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X27);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X28);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_X29);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V8);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V9);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V10);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V11);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V12);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V13);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V14);
+    tcg_regset_reset_reg(s->tcg_target_call_clobber_regs, TCG_REG_V15);
 
     s->reserved_regs = 0;
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_SP);
@@ -2918,7 +2921,7 @@ static const DebugFrame debug_frame = {
     }
 };
 
-void tcg_register_jit(void *buf, size_t buf_size)
+void tcg_register_jit(TCGContext *s, void *buf, size_t buf_size)
 {
-    tcg_register_jit_int(buf, buf_size, &debug_frame, sizeof(debug_frame));
+    tcg_register_jit_int(s, buf, buf_size, &debug_frame, sizeof(debug_frame));
 }

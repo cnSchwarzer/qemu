@@ -8,11 +8,9 @@
 
 #include "qemu/osdep.h"
 
-uintptr_t qemu_real_host_page_size;
-intptr_t qemu_real_host_page_mask;
+#include <uc_priv.h>
 
-static void __attribute__((constructor)) init_real_host_page_size(void)
+void init_real_host_page_size(struct uc_struct *uc)
 {
-    qemu_real_host_page_size = getpagesize();
-    qemu_real_host_page_mask = -(intptr_t)qemu_real_host_page_size;
+    uc->qemu_real_host_page_size = getpagesize();
 }

@@ -244,7 +244,7 @@ void HELPER(crypto_sha1_3reg)(void *vd, void *vn, void *vm, uint32_t op)
         int i;
 
         for (i = 0; i < 4; i++) {
-            uint32_t t;
+            uint32_t t = 0;
 
             switch (op) {
             case 0: /* sha1c */
@@ -562,7 +562,7 @@ void HELPER(crypto_sm3tt)(void *vd, void *vn, void *vm, uint32_t imm2,
     union CRYPTO_STATE d = { .l = { rd[0], rd[1] } };
     union CRYPTO_STATE n = { .l = { rn[0], rn[1] } };
     union CRYPTO_STATE m = { .l = { rm[0], rm[1] } };
-    uint32_t t;
+    uint32_t t = 0;
 
     assert(imm2 < 4);
 

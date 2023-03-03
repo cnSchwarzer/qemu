@@ -1,8 +1,6 @@
 #ifndef MMU_RADIX64_H
 #define MMU_RADIX64_H
 
-#ifndef CONFIG_USER_ONLY
-
 /* Radix Quadrants */
 #define R_EADDR_MASK            0x3FFFFFFFFFFFFFFF
 #define R_EADDR_QUADRANT        0xC000000000000000
@@ -67,7 +65,5 @@ static inline int ppc_radix64_get_prot_amr(PowerPCCPU *cpu)
 }
 
 #endif /* TARGET_PPC64 */
-
-#endif /* CONFIG_USER_ONLY */
 
 #endif /* MMU_RADIX64_H */

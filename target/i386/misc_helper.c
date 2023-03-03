@@ -18,74 +18,78 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/main-loop.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
-#include "exec/address-spaces.h"
+#include "exec/ioport.h"
+
+#include "uc_priv.h"
 
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
-#ifdef CONFIG_USER_ONLY
-    fprintf(stderr, "outb: port=0x%04x, data=%02x\n", port, data);
-#else
-    address_space_stb(&address_space_io, port, data,
-                      cpu_get_mem_attrs(env), NULL);
-#endif
+// #ifdef UNICORN_ARCH_POSTFIX
+//     glue(address_space_stb, UNICORN_ARCH_POSTFIX)(env->uc, &env->uc->address_space_io, port, data & 0xff,
+// #else
+//     address_space_stb(env->uc, &env->uc->address_space_io, port, data & 0xff,
+// #endif
+//                       cpu_get_mem_attrs(env), NULL);
+    return cpu_outb(env->uc, port, data);
 }
 
 target_ulong helper_inb(CPUX86State *env, uint32_t port)
 {
-#ifdef CONFIG_USER_ONLY
-    fprintf(stderr, "inb: port=0x%04x\n", port);
-    return 0;
-#else
-    return address_space_ldub(&address_space_io, port,
-                              cpu_get_mem_attrs(env), NULL);
-#endif
+// #ifdef UNICORN_ARCH_POSTFIX
+//     return glue(address_space_ldub, UNICORN_ARCH_POSTFIX)(env->uc, &env->uc->address_space_io, port,
+// #else
+//     return address_space_ldub(env->uc, &env->uc->address_space_io, port,
+// #endif
+//                               cpu_get_mem_attrs(env), NULL);
+    return cpu_inb(env->uc, port);
 }
 
 void helper_outw(CPUX86State *env, uint32_t port, uint32_t data)
 {
-#ifdef CONFIG_USER_ONLY
-    fprintf(stderr, "outw: port=0x%04x, data=%04x\n", port, data);
-#else
-    address_space_stw(&address_space_io, port, data,
-                      cpu_get_mem_attrs(env), NULL);
-#endif
+// #ifdef UNICORN_ARCH_POSTFIX
+//     glue(address_space_stw, UNICORN_ARCH_POSTFIX)(env->uc, &env->uc->address_space_io, port, data & 0xffff,
+// #else
+//     address_space_stw(env->uc, &env->uc->address_space_io, port, data & 0xffff,
+// #endif
+//                       cpu_get_mem_attrs(env), NULL);
+    return cpu_outw(env->uc, port, data);
 }
 
 target_ulong helper_inw(CPUX86State *env, uint32_t port)
 {
-#ifdef CONFIG_USER_ONLY
-    fprintf(stderr, "inw: port=0x%04x\n", port);
-    return 0;
-#else
-    return address_space_lduw(&address_space_io, port,
-                              cpu_get_mem_attrs(env), NULL);
-#endif
+// #ifdef UNICORN_ARCH_POSTFIX
+//     return glue(address_space_lduw, UNICORN_ARCH_POSTFIX)(env->uc, &env->uc->address_space_io, port,
+// #else
+//     return address_space_lduw(env->uc, &env->uc->address_space_io, port,
+// #endif
+//                               cpu_get_mem_attrs(env), NULL);
+    return cpu_inw(env->uc, port);
 }
 
 void helper_outl(CPUX86State *env, uint32_t port, uint32_t data)
 {
-#ifdef CONFIG_USER_ONLY
-    fprintf(stderr, "outw: port=0x%04x, data=%08x\n", port, data);
-#else
-    address_space_stl(&address_space_io, port, data,
-                      cpu_get_mem_attrs(env), NULL);
-#endif
+// #ifdef UNICORN_ARCH_POSTFIX
+//     glue(address_space_stl, UNICORN_ARCH_POSTFIX)(env->uc, &env->uc->address_space_io, port, data,
+// #else
+//     address_space_stl(env->uc, &env->uc->address_space_io, port, data,
+// #endif
+//                       cpu_get_mem_attrs(env), NULL);
+    return cpu_outl(env->uc, port, data);
 }
 
 target_ulong helper_inl(CPUX86State *env, uint32_t port)
 {
-#ifdef CONFIG_USER_ONLY
-    fprintf(stderr, "inl: port=0x%04x\n", port);
-    return 0;
-#else
-    return address_space_ldl(&address_space_io, port,
-                             cpu_get_mem_attrs(env), NULL);
-#endif
+// #ifdef UNICORN_ARCH_POSTFIX
+//     return glue(address_space_ldl, UNICORN_ARCH_POSTFIX)(env->uc, &env->uc->address_space_io, port,
+// #else
+//     return address_space_ldl(env->uc, &env->uc->address_space_io, port,
+// #endif
+//                              cpu_get_mem_attrs(env), NULL);
+    return cpu_inl(env->uc, port);
 }
 
 void helper_into(CPUX86State *env, int next_eip_addend)
@@ -101,27 +105,40 @@ void helper_into(CPUX86State *env, int next_eip_addend)
 void helper_cpuid(CPUX86State *env)
 {
     uint32_t eax, ebx, ecx, edx;
+    struct hook *hook;
+    int skip_cpuid = 0;
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_CPUID, 0, GETPC());
 
-    cpu_x86_cpuid(env, (uint32_t)env->regs[R_EAX], (uint32_t)env->regs[R_ECX],
-                  &eax, &ebx, &ecx, &edx);
-    env->regs[R_EAX] = eax;
-    env->regs[R_EBX] = ebx;
-    env->regs[R_ECX] = ecx;
-    env->regs[R_EDX] = edx;
+    // Unicorn: call registered CPUID hooks
+    HOOK_FOREACH_VAR_DECLARE;
+    HOOK_FOREACH(env->uc, hook, UC_HOOK_INSN) {
+        if (hook->to_delete)
+            continue;
+        if (!HOOK_BOUND_CHECK(hook, env->eip))
+            continue;
+        
+        // Multiple cpuid callbacks returning different values is undefined.
+        // true -> skip the cpuid instruction
+        if (hook->insn == UC_X86_INS_CPUID)
+            skip_cpuid = ((uc_cb_insn_cpuid_t)hook->callback)(env->uc, hook->user_data);
+
+        // the last callback may already asked to stop emulation
+        if (env->uc->stop_request)
+            break;
+    }
+
+    if (!skip_cpuid) {
+        cpu_x86_cpuid(env, (uint32_t)env->regs[R_EAX], (uint32_t)env->regs[R_ECX],
+                    &eax, &ebx, &ecx, &edx);
+        env->regs[R_EAX] = eax;
+        env->regs[R_EBX] = ebx;
+        env->regs[R_ECX] = ecx;
+        env->regs[R_EDX] = edx;
+    }
+    
 }
 
-#if defined(CONFIG_USER_ONLY)
-target_ulong helper_read_crN(CPUX86State *env, int reg)
-{
-    return 0;
-}
-
-void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
-{
-}
-#else
 target_ulong helper_read_crN(CPUX86State *env, int reg)
 {
     target_ulong val;
@@ -133,7 +150,8 @@ target_ulong helper_read_crN(CPUX86State *env, int reg)
         break;
     case 8:
         if (!(env->hflags2 & HF2_VINTR_MASK)) {
-            val = cpu_get_apic_tpr(env_archcpu(env)->apic_state);
+            // val = cpu_get_apic_tpr(env_archcpu(env)->apic_state);
+            val = 0;
         } else {
             val = env->v_tpr;
         }
@@ -147,20 +165,20 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
     cpu_svm_check_intercept_param(env, SVM_EXIT_WRITE_CR0 + reg, 0, GETPC());
     switch (reg) {
     case 0:
-        cpu_x86_update_cr0(env, t0);
+        cpu_x86_update_cr0(env, (uint32_t)t0);
         break;
     case 3:
         cpu_x86_update_cr3(env, t0);
         break;
     case 4:
-        cpu_x86_update_cr4(env, t0);
+        cpu_x86_update_cr4(env, (uint32_t)t0);
         break;
     case 8:
+#if 0
         if (!(env->hflags2 & HF2_VINTR_MASK)) {
-            qemu_mutex_lock_iothread();
             cpu_set_apic_tpr(env_archcpu(env)->apic_state, t0);
-            qemu_mutex_unlock_iothread();
         }
+#endif
         env->v_tpr = t0 & 0x0f;
         break;
     default:
@@ -168,7 +186,6 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         break;
     }
 }
-#endif
 
 void helper_lmsw(CPUX86State *env, target_ulong t0)
 {
@@ -218,15 +235,6 @@ void helper_rdpmc(CPUX86State *env)
     raise_exception_err(env, EXCP06_ILLOP, 0);
 }
 
-#if defined(CONFIG_USER_ONLY)
-void helper_wrmsr(CPUX86State *env)
-{
-}
-
-void helper_rdmsr(CPUX86State *env)
-{
-}
-#else
 void helper_wrmsr(CPUX86State *env)
 {
     uint64_t val;
@@ -247,7 +255,7 @@ void helper_wrmsr(CPUX86State *env)
         env->sysenter_eip = val;
         break;
     case MSR_IA32_APICBASE:
-        cpu_set_apic_base(env_archcpu(env)->apic_state, val);
+        // cpu_set_apic_base(env_archcpu(env)->apic_state, val);
         break;
     case MSR_EFER:
         {
@@ -405,7 +413,7 @@ void helper_rdmsr(CPUX86State *env)
         val = env->sysenter_eip;
         break;
     case MSR_IA32_APICBASE:
-        val = cpu_get_apic_base(env_archcpu(env)->apic_state);
+        val = 0; // cpu_get_apic_base(env_archcpu(env)->apic_state);
         break;
     case MSR_EFER:
         val = env->efer;
@@ -541,7 +549,6 @@ void helper_rdmsr(CPUX86State *env)
     env->regs[R_EAX] = (uint32_t)(val);
     env->regs[R_EDX] = (uint32_t)(val >> 32);
 }
-#endif
 
 static void do_pause(X86CPU *cpu)
 {
@@ -590,12 +597,14 @@ void helper_mwait(CPUX86State *env, int next_eip_addend)
     if ((uint32_t)env->regs[R_ECX] != 0) {
         raise_exception_ra(env, EXCP0D_GPF, GETPC());
     }
+
     cpu_svm_check_intercept_param(env, SVM_EXIT_MWAIT, 0, GETPC());
     env->eip += next_eip_addend;
 
     /* XXX: not complete but not completely erroneous */
-    if (cs->cpu_index != 0 || CPU_NEXT(cs) != NULL) {
-        do_pause(cpu);
+    // if (cs->cpu_index != 0 || CPU_NEXT(cs) != NULL) { // TODO
+    if (cs->cpu_index != 0) {
+        // do_pause(cpu);
     } else {
         do_hlt(cpu);
     }

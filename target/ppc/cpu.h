@@ -24,6 +24,8 @@
 #include "exec/cpu-defs.h"
 #include "cpu-qom.h"
 
+typedef struct TCGContext TCGContext;
+
 #define TCG_GUEST_DEFAULT_MO 0
 
 #define TARGET_PAGE_BITS_64K 16
@@ -192,13 +194,10 @@ typedef struct ppc_hash_pte64 ppc_hash_pte64_t;
 struct ppc_spr_t {
     void (*uea_read)(DisasContext *ctx, int gpr_num, int spr_num);
     void (*uea_write)(DisasContext *ctx, int spr_num, int gpr_num);
-#if !defined(CONFIG_USER_ONLY)
     void (*oea_read)(DisasContext *ctx, int gpr_num, int spr_num);
     void (*oea_write)(DisasContext *ctx, int spr_num, int gpr_num);
     void (*hea_read)(DisasContext *ctx, int gpr_num, int spr_num);
     void (*hea_write)(DisasContext *ctx, int spr_num, int gpr_num);
-    unsigned int gdb_id;
-#endif
     const char *name;
     target_ulong default_value;
 #ifdef CONFIG_KVM
@@ -233,7 +232,6 @@ typedef union _ppc_vsr_t {
 typedef ppc_vsr_t ppc_avr_t;
 typedef ppc_vsr_t ppc_fprp_t;
 
-#if !defined(CONFIG_USER_ONLY)
 /* Software TLB cache */
 typedef struct ppc6xx_tlb_t ppc6xx_tlb_t;
 struct ppc6xx_tlb_t {
@@ -270,7 +268,6 @@ union ppc_tlb_t {
 #define TLB_6XX                1
 #define TLB_EMB                2
 #define TLB_MAS                3
-#endif
 
 typedef struct PPCHash64SegmentPageSizes PPCHash64SegmentPageSizes;
 
@@ -984,7 +981,6 @@ struct CPUPPCState {
     /* when a memory exception occurs, the access type is stored here */
     int access_type;
 
-#if !defined(CONFIG_USER_ONLY)
     /* MMU context, only relevant for full system emulation */
 #if defined(TARGET_PPC64)
     ppc_slb_t slb[MAX_SLB_ENTRIES]; /* PowerPC 64 SLB area */
@@ -1008,7 +1004,6 @@ struct CPUPPCState {
     uint32_t tlb_need_flush; /* Delayed flush needed */
 #define TLB_NEED_LOCAL_FLUSH   0x1
 #define TLB_NEED_GLOBAL_FLUSH  0x2
-#endif
 
     /* Other registers */
     target_ulong spr[1024]; /* special purpose registers */
@@ -1047,7 +1042,6 @@ struct CPUPPCState {
 
     int error_code;
     uint32_t pending_interrupts;
-#if !defined(CONFIG_USER_ONLY)
     /*
      * This is the IRQ controller, which is implementation dependent and only
      * relevant when emulating a complete machine. Note that this isn't used
@@ -1070,7 +1064,6 @@ struct CPUPPCState {
      * special way (such as routing some resume causes to 0x100, i.e. sreset).
      */
     bool resume_as_sreset;
-#endif
 
     /* These resources are used only in QEMU core */
     target_ulong hflags;      /* hflags is MSR & HFLAGS_MASK */
@@ -1081,9 +1074,7 @@ struct CPUPPCState {
     /* Power management */
     int (*check_pow)(CPUPPCState *env);
 
-#if !defined(CONFIG_USER_ONLY)
     void *load_info;  /* holds boot loading state */
-#endif
 
     /* booke timers */
 
@@ -1109,6 +1100,9 @@ struct CPUPPCState {
     uint32_t tm_vscr;
     uint64_t tm_dscr;
     uint64_t tm_tar;
+
+    /* Unicorn engine */
+    struct uc_struct *uc;
 };
 
 #define SET_FIT_PERIOD(a_, b_, c_, d_)          \
@@ -1127,8 +1121,10 @@ do {                                            \
     env->wdt_period[3] = (d_);                  \
  } while (0)
 
+#if 0
 typedef struct PPCVirtualHypervisor PPCVirtualHypervisor;
 typedef struct PPCVirtualHypervisorClass PPCVirtualHypervisorClass;
+#endif
 
 /**
  * PowerPCCPU:
@@ -1148,7 +1144,9 @@ struct PowerPCCPU {
 
     int vcpu_id;
     uint32_t compat_pvr;
+#if 0
     PPCVirtualHypervisor *vhyp;
+#endif
     void *machine_data;
     int32_t node_id; /* NUMA node this CPU belongs to */
     PPCHash64Options *hash64_opts;
@@ -1166,6 +1164,8 @@ struct PowerPCCPU {
     bool pre_2_10_migration;
     bool pre_3_0_migration;
     int32_t mig_slb_nr;
+
+    struct PowerPCCPUClass cc;
 };
 
 
@@ -1173,6 +1173,7 @@ PowerPCCPUClass *ppc_cpu_class_by_pvr(uint32_t pvr);
 PowerPCCPUClass *ppc_cpu_class_by_pvr_mask(uint32_t pvr);
 PowerPCCPUClass *ppc_cpu_get_family_class(PowerPCCPUClass *pcc);
 
+#if 0
 struct PPCVirtualHypervisorClass {
     InterfaceClass parent;
     void (*hypercall)(PPCVirtualHypervisor *vhyp, PowerPCCPU *cpu);
@@ -1186,10 +1187,8 @@ struct PPCVirtualHypervisorClass {
     void (*hpte_set_r)(PPCVirtualHypervisor *vhyp, hwaddr ptex, uint64_t pte1);
     void (*get_pate)(PPCVirtualHypervisor *vhyp, ppc_v3_pate_t *entry);
     target_ulong (*encode_hpt_for_kvm_pr)(PPCVirtualHypervisor *vhyp);
-#ifndef CONFIG_USER_ONLY
     void (*cpu_exec_enter)(PPCVirtualHypervisor *vhyp, PowerPCCPU *cpu);
     void (*cpu_exec_exit)(PPCVirtualHypervisor *vhyp, PowerPCCPU *cpu);
-#endif
 };
 
 #define TYPE_PPC_VIRTUAL_HYPERVISOR "ppc-virtual-hypervisor"
@@ -1201,32 +1200,21 @@ struct PPCVirtualHypervisorClass {
 #define PPC_VIRTUAL_HYPERVISOR_GET_CLASS(obj) \
     OBJECT_GET_CLASS(PPCVirtualHypervisorClass, (obj), \
                      TYPE_PPC_VIRTUAL_HYPERVISOR)
+#endif
 
 void ppc_cpu_do_interrupt(CPUState *cpu);
 bool ppc_cpu_exec_interrupt(CPUState *cpu, int int_req);
-void ppc_cpu_dump_state(CPUState *cpu, FILE *f, int flags);
-void ppc_cpu_dump_statistics(CPUState *cpu, int flags);
 hwaddr ppc_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
-int ppc_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
-int ppc_cpu_gdb_read_register_apple(CPUState *cpu, GByteArray *buf, int reg);
-int ppc_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
-int ppc_cpu_gdb_write_register_apple(CPUState *cpu, uint8_t *buf, int reg);
-#ifndef CONFIG_USER_ONLY
-void ppc_gdb_gen_spr_xml(PowerPCCPU *cpu);
-const char *ppc_gdb_get_dynamic_xml(CPUState *cs, const char *xml_name);
-#endif
-int ppc64_cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cs,
-                               int cpuid, void *opaque);
-int ppc32_cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cs,
-                               int cpuid, void *opaque);
-#ifndef CONFIG_USER_ONLY
+
 void ppc_cpu_do_system_reset(CPUState *cs, target_ulong vector);
 void ppc_cpu_do_fwnmi_machine_check(CPUState *cs, target_ulong vector);
+#if 0
 extern const VMStateDescription vmstate_ppc_cpu;
 #endif
 
 /*****************************************************************************/
-void ppc_translate_init(void);
+void ppc_translate_init(struct uc_struct *uc);
+
 /*
  * you can call this signal handler from your SIGBUS and SIGSEGV
  * signal handlers to inform the virtual CPU of exceptions. non zero
@@ -1237,10 +1225,9 @@ bool ppc_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                       MMUAccessType access_type, int mmu_idx,
                       bool probe, uintptr_t retaddr);
 
-#if !defined(CONFIG_USER_ONLY)
 void ppc_store_sdr1(CPUPPCState *env, target_ulong value);
 void ppc_store_ptcr(CPUPPCState *env, target_ulong value);
-#endif /* !defined(CONFIG_USER_ONLY) */
+
 void ppc_store_msr(CPUPPCState *env, target_ulong value);
 
 void ppc_cpu_list(void);
@@ -1267,7 +1254,6 @@ uint64_t cpu_ppc_load_purr(CPUPPCState *env);
 void cpu_ppc_store_purr(CPUPPCState *env, uint64_t value);
 uint32_t cpu_ppc601_load_rtcl(CPUPPCState *env);
 uint32_t cpu_ppc601_load_rtcu(CPUPPCState *env);
-#if !defined(CONFIG_USER_ONLY)
 void cpu_ppc601_store_rtcl(CPUPPCState *env, uint32_t value);
 void cpu_ppc601_store_rtcu(CPUPPCState *env, uint32_t value);
 target_ulong load_40x_pit(CPUPPCState *env);
@@ -1278,6 +1264,7 @@ void store_booke_tcr(CPUPPCState *env, target_ulong val);
 void store_booke_tsr(CPUPPCState *env, target_ulong val);
 void ppc_tlb_invalidate_all(CPUPPCState *env);
 void ppc_tlb_invalidate_one(CPUPPCState *env, target_ulong addr);
+#if 0
 void cpu_ppc_set_vhyp(PowerPCCPU *cpu, PPCVirtualHypervisor *vhyp);
 #endif
 #endif
@@ -1328,15 +1315,14 @@ bool ppc_check_compat(PowerPCCPU *cpu, uint32_t compat_pvr,
 bool ppc_type_check_compat(const char *cputype, uint32_t compat_pvr,
                            uint32_t min_compat_pvr, uint32_t max_compat_pvr);
 
-void ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr, Error **errp);
+void ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr);
 
-#if !defined(CONFIG_USER_ONLY)
-void ppc_set_compat_all(uint32_t compat_pvr, Error **errp);
-#endif
+void ppc_set_compat_all(uint32_t compat_pvr);
 int ppc_compat_max_vthreads(PowerPCCPU *cpu);
+#if 0
 void ppc_compat_add_property(Object *obj, const char *name,
-                             uint32_t *compat_pvr, const char *basedesc,
-                             Error **errp);
+                             uint32_t *compat_pvr, const char *basedesc);
+#endif
 #endif /* defined(TARGET_PPC64) */
 
 typedef CPUPPCState CPUArchState;
@@ -2032,8 +2018,13 @@ enum {
     PPC_MEM_TLBIA      = 0x0000000010000000ULL,
     PPC_MEM_TLBIE      = 0x0000000020000000ULL,
     PPC_MEM_TLBSYNC    = 0x0000000040000000ULL,
+
+// The enum in msvc is 32bit **signed**.
+// https://godbolt.org/z/nYbvWPWET
+#ifndef _MSC_VER
     /*   sync instruction                                                    */
     PPC_MEM_SYNC       = 0x0000000080000000ULL,
+
     /*   eieio instruction                                                   */
     PPC_MEM_EIEIO      = 0x0000000100000000ULL,
 
@@ -2096,6 +2087,38 @@ enum {
     PPC_DCRUX          = 0x4000000000000000ULL,
     /* popcntw and popcntd instructions                                      */
     PPC_POPCNTWD       = 0x8000000000000000ULL,
+#else
+#define PPC_MEM_SYNC        0x0000000080000000ULL
+#define PPC_MEM_EIEIO       0x0000000100000000ULL
+#define PPC_CACHE           0x0000000200000000ULL
+#define PPC_CACHE_ICBI      0x0000000400000000ULL
+#define PPC_CACHE_DCBZ      0x0000000800000000ULL
+#define PPC_CACHE_DCBA      0x0000002000000000ULL
+#define PPC_CACHE_LOCK      0x0000004000000000ULL
+#define PPC_EXTERN          0x0000010000000000ULL
+#define PPC_SEGMENT         0x0000020000000000ULL
+#define PPC_6xx_TLB         0x0000040000000000ULL
+#define PPC_74xx_TLB        0x0000080000000000ULL
+#define PPC_40x_TLB         0x0000100000000000ULL
+#define PPC_SEGMENT_64B     0x0000200000000000ULL
+#define PPC_SLBI            0x0000400000000000ULL
+#define PPC_WRTEE           0x0001000000000000ULL
+#define PPC_40x_EXCP        0x0002000000000000ULL
+#define PPC_405_MAC         0x0004000000000000ULL
+#define PPC_440_SPEC        0x0008000000000000ULL
+#define PPC_BOOKE           0x0010000000000000ULL
+#define PPC_MFAPIDI         0x0020000000000000ULL
+#define PPC_TLBIVA          0x0040000000000000ULL
+#define PPC_TLBIVAX         0x0080000000000000ULL
+#define PPC_4xx_COMMON      0x0100000000000000ULL
+#define PPC_40x_ICBT        0x0200000000000000ULL
+#define PPC_RFMCI           0x0400000000000000ULL
+#define PPC_RFDI            0x0800000000000000ULL
+#define PPC_DCR             0x1000000000000000ULL
+#define PPC_DCRX            0x2000000000000000ULL
+#define PPC_DCRUX           0x4000000000000000ULL
+#define PPC_POPCNTWD        0x8000000000000000ULL
+#endif
 
 #define PPC_TCG_INSNS  (PPC_INSNS_BASE | PPC_POWER | PPC_POWER2 \
                         | PPC_POWER_RTC | PPC_POWER_BR | PPC_64B \
@@ -2324,12 +2347,19 @@ enum {
     PCR_COMPAT_2_07     = PPC_BIT(60),
     PCR_COMPAT_3_00     = PPC_BIT(59),
     PCR_COMPAT_3_10     = PPC_BIT(58),
+#ifndef _MSC_VER
     PCR_VEC_DIS         = PPC_BIT(0), /* Vec. disable (bit NA since POWER8) */
     PCR_VSX_DIS         = PPC_BIT(1), /* VSX disable (bit NA since POWER8) */
     PCR_TM_DIS          = PPC_BIT(2), /* Trans. memory disable (POWER8) */
+#else
+#define PCR_VEC_DIS     PPC_BIT(0)
+#define PCR_VSX_DIS     PPC_BIT(1)
+#define PCR_TM_DIS      PPC_BIT(2)
+#endif
 };
 
 /* HMER/HMEER */
+#ifndef _MSC_VER
 enum {
     HMER_MALFUNCTION_ALERT      = PPC_BIT(0),
     HMER_PROC_RECV_DONE         = PPC_BIT(2),
@@ -2346,6 +2376,22 @@ enum {
     HMER_HYP_RESOURCE_ERR       = PPC_BIT(20),
     HMER_XSCOM_STATUS_MASK      = PPC_BITMASK(21, 23),
 };
+#else
+#define HMER_MALFUNCTION_ALERT          PPC_BIT(0)
+#define HMER_PROC_RECV_DONE             PPC_BIT(2)
+#define HMER_PROC_RECV_ERROR_MASKED     PPC_BIT(3)
+#define HMER_TFAC_ERROR                 PPC_BIT(4)
+#define HMER_TFMR_PARITY_ERROR          PPC_BIT(5)
+#define HMER_XSCOM_FAIL                 PPC_BIT(8)
+#define HMER_XSCOM_DONE                 PPC_BIT(9)
+#define HMER_PROC_RECV_AGAIN            PPC_BIT(11)
+#define HMER_WARN_RISE                  PPC_BIT(14)
+#define HMER_WARN_FALL                  PPC_BIT(15)
+#define HMER_SCOM_FIR_HMI               PPC_BIT(16)
+#define HMER_TRIG_FIR_HMI               PPC_BIT(17)
+#define HMER_HYP_RESOURCE_ERR           PPC_BIT(20)
+#define HMER_XSCOM_STATUS_MASK          PPC_BITMASK(21, 23)
+#endif
 
 /* Alternate Interrupt Location (AIL) */
 enum {
@@ -2383,7 +2429,6 @@ void QEMU_NORETURN raise_exception_err(CPUPPCState *env, uint32_t exception,
 void QEMU_NORETURN raise_exception_err_ra(CPUPPCState *env, uint32_t exception,
                                           uint32_t error_code, uintptr_t raddr);
 
-#if !defined(CONFIG_USER_ONLY)
 static inline int booke206_tlbm_id(CPUPPCState *env, ppcmas_tlb_t *tlbm)
 {
     uintptr_t tlbml = (uintptr_t)tlbm;
@@ -2498,8 +2543,6 @@ static inline void booke206_fixed_size_tlbn(CPUPPCState *env, const int tlbn,
     tlb->mas1 &= ~MAS1_TSIZE_MASK;
     tlb->mas1 |= ((uint32_t)tsize) << MAS1_TSIZE_SHIFT;
 }
-
-#endif
 
 static inline bool msr_is_64bit(CPUPPCState *env, target_ulong msr)
 {

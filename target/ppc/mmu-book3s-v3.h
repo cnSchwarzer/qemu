@@ -22,8 +22,6 @@
 
 #include "mmu-hash64.h"
 
-#ifndef CONFIG_USER_ONLY
-
 /*
  * Partition table definitions
  */
@@ -76,9 +74,11 @@ static inline hwaddr ppc_hash64_hpt_base(PowerPCCPU *cpu)
 {
     uint64_t base;
 
+#if 0
     if (cpu->vhyp) {
         return 0;
     }
+#endif
     if (cpu->env.mmu_model == POWERPC_MMU_3_00) {
         ppc_v3_pate_t pate;
 
@@ -96,11 +96,13 @@ static inline hwaddr ppc_hash64_hpt_mask(PowerPCCPU *cpu)
 {
     uint64_t base;
 
+#if 0
     if (cpu->vhyp) {
         PPCVirtualHypervisorClass *vhc =
             PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         return vhc->hpt_mask(cpu->vhyp);
     }
+#endif
     if (cpu->env.mmu_model == POWERPC_MMU_3_00) {
         ppc_v3_pate_t pate;
 
@@ -115,7 +117,5 @@ static inline hwaddr ppc_hash64_hpt_mask(PowerPCCPU *cpu)
 }
 
 #endif /* TARGET_PPC64 */
-
-#endif /* CONFIG_USER_ONLY */
 
 #endif /* PPC_MMU_BOOK3S_V3_H */

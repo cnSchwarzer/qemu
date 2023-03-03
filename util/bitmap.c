@@ -157,7 +157,7 @@ int slow_bitmap_andnot(unsigned long *dst, const unsigned long *bitmap1,
     return result != 0;
 }
 
-void bitmap_set(unsigned long *map, long start, long nr)
+void qemu_bitmap_set(unsigned long *map, long start, long nr)
 {
     unsigned long *p = map + BIT_WORD(start);
     const long size = start + nr;
@@ -218,7 +218,7 @@ void bitmap_set_atomic(unsigned long *map, long start, long nr)
     }
 }
 
-void bitmap_clear(unsigned long *map, long start, long nr)
+void qemu_bitmap_clear(unsigned long *map, long start, long nr)
 {
     unsigned long *p = map + BIT_WORD(start);
     const long size = start + nr;
@@ -265,7 +265,8 @@ bool bitmap_test_and_clear_atomic(unsigned long *map, long start, long nr)
     if (bits_to_clear == BITS_PER_LONG) {
         while (nr >= BITS_PER_LONG) {
             if (*p) {
-                old_bits = atomic_xchg(p, 0);
+                old_bits = *p;
+                *p = 0;
                 dirty |= old_bits;
             }
             nr -= BITS_PER_LONG;
@@ -291,7 +292,8 @@ void bitmap_copy_and_clear_atomic(unsigned long *dst, unsigned long *src,
                                   long nr)
 {
     while (nr > 0) {
-        *dst = atomic_xchg(src, 0);
+        *dst = *src;
+        *src = 0;
         dst++;
         src++;
         nr -= BITS_PER_LONG;

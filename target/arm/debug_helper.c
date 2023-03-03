@@ -309,8 +309,6 @@ void arm_debug_excp_handler(CPUState *cs)
     }
 }
 
-#if !defined(CONFIG_USER_ONLY)
-
 vaddr arm_adjust_watchpoint_address(CPUState *cs, vaddr addr, int len)
 {
     ARMCPU *cpu = ARM_CPU(cs);
@@ -333,5 +331,3 @@ vaddr arm_adjust_watchpoint_address(CPUState *cs, vaddr addr, int len)
 
     return addr;
 }
-
-#endif

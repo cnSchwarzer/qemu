@@ -7,6 +7,94 @@
 #ifndef COMPILER_H
 #define COMPILER_H
 
+#include "unicorn/platform.h"
+
+#ifndef glue
+#define xglue(x, y) x ## y
+#define glue(x, y) xglue(x, y)
+#define stringify(s)	tostring(s)
+#define tostring(s)	#s
+#endif
+
+#ifdef _MSC_VER
+// MSVC support
+
+#define inline		__inline
+#define __func__	__FUNCTION__
+
+#include <math.h>
+#include <float.h>
+
+#if _MSC_VER < MSC_VER_VS2013
+#define isinf(x) (!_finite(x))
+#if defined(_WIN64)
+#define isnan	_isnanf
+#else
+#define isnan	_isnan
+#endif
+#endif
+
+/* gcc __builtin___clear_cache() */
+static inline void __builtin___clear_cache(void *beg, void *e)
+{
+    unsigned char *start = beg;
+    unsigned char *end = e;
+    FlushInstructionCache(GetCurrentProcess(), start, end - start);
+}
+
+static inline double rint( double x )
+{
+    return floor(x < 0 ? x - 0.5 : x + 0.5);
+}
+
+union MSVC_FLOAT_HACK
+{
+   unsigned char Bytes[4];
+   float Value;
+};
+
+#ifndef NAN
+static union MSVC_FLOAT_HACK __NAN = {{0x00, 0x00, 0xC0, 0x7F}};
+#define NAN (__NAN.Value)
+#endif
+
+#define QEMU_DIV0 __pragma(warning(suppress:2124))	// divide by zero error
+
+#define QEMU_GNUC_PREREQ(maj, min) 0
+
+#define QEMU_NORETURN __declspec(noreturn)
+#define QEMU_UNUSED_VAR __pragma(warning(suppress:4100))	// unused variables only
+#define QEMU_UNUSED_FUNC
+#define QEMU_WARN_UNUSED_RESULT
+#define QEMU_ARTIFICIAL
+#define QEMU_PACK( __Declaration__ ) __pragma( pack(push, 1) ) __Declaration__ __pragma( pack(pop) )
+#define QEMU_NOINLINE __declspec(noinline)
+
+#define QEMU_ALIGN(A, B) __declspec(align(A)) B
+#define QEMU_ALIGNED(X)
+
+#define cat(x,y) x ## y
+#define cat2(x,y) cat(x,y)
+#define QEMU_BUILD_BUG_ON(x)
+#define QEMU_BUILD_BUG_ON_ZERO(x)
+#define QEMU_BUILD_BUG_MSG(x, msg)
+
+#define GCC_FMT_ATTR(n, m)
+
+#define likely(x) (x)
+#define unlikely(x) (x)
+
+#define container_of(ptr, type, member) ((type *)((char *)(ptr) - offsetof(type, member)))
+
+#define QEMU_FLATTEN
+#define QEMU_ALWAYS_INLINE  __declspec(inline)
+
+#else  // Unix compilers
+
+#ifndef NAN
+#define NAN		(0.0 / 0.0)
+#endif
+
 #if defined __clang_analyzer__ || defined __COVERITY__
 #define QEMU_STATIC_ANALYSIS 1
 #endif
@@ -24,24 +112,26 @@
 
 #define QEMU_NORETURN __attribute__ ((__noreturn__))
 
+#define QEMU_UNUSED_VAR __attribute__((unused))
+#define QEMU_UNUSED_FUNC __attribute__((unused))
+
 #define QEMU_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
 
 #define QEMU_SENTINEL __attribute__((sentinel))
 
 #if defined(_WIN32) && (defined(__x86_64__) || defined(__i386__))
 # define QEMU_PACKED __attribute__((gcc_struct, packed))
+# define QEMU_PACK( __Declaration__ ) __Declaration__ __attribute__((gcc_struct, packed))
 #else
 # define QEMU_PACKED __attribute__((packed))
+# define QEMU_PACK( __Declaration__ ) __Declaration__ __attribute__((packed))
 #endif
+
+#define QEMU_ALIGN(A, B) B __attribute__((aligned(A)))
 
 #define QEMU_ALIGNED(X) __attribute__((aligned(X)))
 
-#ifndef glue
-#define xglue(x, y) x ## y
-#define glue(x, y) xglue(x, y)
-#define stringify(s)	tostring(s)
-#define tostring(s)	#s
-#endif
+#define QEMU_NOINLINE __attribute__((noinline))
 
 #ifndef likely
 #if __GNUC__ < 3
@@ -243,4 +333,5 @@ extern void QEMU_NORETURN QEMU_ERROR("code path is reachable")
 #define qemu_build_not_reached()  g_assert_not_reached()
 #endif
 
+#endif // _MSC_VER
 #endif /* COMPILER_H */

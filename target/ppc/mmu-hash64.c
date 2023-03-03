@@ -22,13 +22,7 @@
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "exec/helper-proto.h"
-#include "qemu/error-report.h"
-#include "qemu/qemu-print.h"
-#include "sysemu/hw_accel.h"
-#include "kvm_ppc.h"
 #include "mmu-hash64.h"
-#include "exec/log.h"
-#include "hw/hw.h"
 #include "mmu-book3s-v3.h"
 
 /* #define DEBUG_SLB */
@@ -81,17 +75,21 @@ void dump_slb(PowerPCCPU *cpu)
     int i;
     uint64_t slbe, slbv;
 
+#if 0
     cpu_synchronize_state(CPU(cpu));
 
     qemu_printf("SLB\tESID\t\t\tVSID\n");
+#endif
     for (i = 0; i < cpu->hash64_opts->slb_size; i++) {
         slbe = env->slb[i].esid;
         slbv = env->slb[i].vsid;
         if (slbe == 0 && slbv == 0) {
             continue;
         }
+#if 0
         qemu_printf("%d\t0x%016" PRIx64 "\t0x%016" PRIx64 "\n",
                     i, slbe, slbv);
+#endif
     }
 }
 
@@ -236,9 +234,11 @@ int ppc_store_slb(PowerPCCPU *cpu, target_ulong slot,
     }
 
     if (!sps) {
+#if 0
         error_report("Bad page size encoding in SLB store: slot "TARGET_FMT_lu
                      " esid 0x"TARGET_FMT_lx" vsid 0x"TARGET_FMT_lx,
                      slot, esid, vsid);
+#endif
         return -1;
     }
 
@@ -246,9 +246,11 @@ int ppc_store_slb(PowerPCCPU *cpu, target_ulong slot,
     slb->vsid = vsid;
     slb->sps = sps;
 
+#if 0
     LOG_SLB("%s: " TARGET_FMT_lu " " TARGET_FMT_lx " - " TARGET_FMT_lx
             " => %016" PRIx64 " %016" PRIx64 "\n", __func__, slot, esid, vsid,
             slb->esid, slb->vsid);
+#endif
 
     return 0;
 }
@@ -294,7 +296,11 @@ static int ppc_find_slb_vsid(PowerPCCPU *cpu, target_ulong rb,
     }
     slb = slb_lookup(cpu, rb);
     if (slb == NULL) {
+#ifdef _MSC_VER
+        *rt = (target_ulong)(0UL - 1UL);
+#else
         *rt = (target_ulong)-1ul;
+#endif
     } else {
         *rt = slb->vsid;
     }
@@ -480,11 +486,13 @@ const ppc_hash_pte64_t *ppc_hash64_map_hptes(PowerPCCPU *cpu,
     hwaddr plen = n * HASH_PTE_SIZE_64;
     const ppc_hash_pte64_t *hptes;
 
+#if 0
     if (cpu->vhyp) {
         PPCVirtualHypervisorClass *vhc =
             PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         return vhc->map_hptes(cpu->vhyp, ptex, n);
     }
+#endif
     base = ppc_hash64_hpt_base(cpu);
 
     if (!base) {
@@ -494,7 +502,7 @@ const ppc_hash_pte64_t *ppc_hash64_map_hptes(PowerPCCPU *cpu,
     hptes = address_space_map(CPU(cpu)->as, base + pte_offset, &plen, false,
                               MEMTXATTRS_UNSPECIFIED);
     if (plen < (n * HASH_PTE_SIZE_64)) {
-        hw_error("%s: Unable to map all requested HPTEs\n", __func__);
+        fprintf(stderr, "%s: Unable to map all requested HPTEs\n", __func__);
     }
     return hptes;
 }
@@ -502,12 +510,14 @@ const ppc_hash_pte64_t *ppc_hash64_map_hptes(PowerPCCPU *cpu,
 void ppc_hash64_unmap_hptes(PowerPCCPU *cpu, const ppc_hash_pte64_t *hptes,
                             hwaddr ptex, int n)
 {
+#if 0
     if (cpu->vhyp) {
         PPCVirtualHypervisorClass *vhc =
             PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         vhc->unmap_hptes(cpu->vhyp, hptes, ptex, n);
         return;
     }
+#endif
 
     address_space_unmap(CPU(cpu)->as, (void *)hptes, n * HASH_PTE_SIZE_64,
                         false, n * HASH_PTE_SIZE_64);
@@ -588,7 +598,7 @@ static hwaddr ppc_hash64_pteg_search(PowerPCCPU *cpu, hwaddr hash,
         pte1 = ppc_hash64_hpte1(cpu, pteg, i);
 
         /* Convert format if necessary */
-        if (cpu->env.mmu_model == POWERPC_MMU_3_00 && !cpu->vhyp) {
+        if (cpu->env.mmu_model == POWERPC_MMU_3_00) {
             ppc64_v3_new_to_old_hpte(&pte0, &pte1);
         }
 
@@ -780,33 +790,45 @@ static void ppc_hash64_set_r(PowerPCCPU *cpu, hwaddr ptex, uint64_t pte1)
 {
     hwaddr base, offset = ptex * HASH_PTE_SIZE_64 + 16;
 
+#if 0
     if (cpu->vhyp) {
         PPCVirtualHypervisorClass *vhc =
             PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         vhc->hpte_set_r(cpu->vhyp, ptex, pte1);
         return;
     }
+#endif
     base = ppc_hash64_hpt_base(cpu);
 
 
     /* The HW performs a non-atomic byte update */
-    stb_phys(CPU(cpu)->as, base + offset, ((pte1 >> 8) & 0xff) | 0x01);
+#ifdef UNICORN_ARCH_POSTFIX
+    glue(stb_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + offset, ((pte1 >> 8) & 0xff) | 0x01);
+#else
+    stb_phys(cpu->env.uc, CPU(cpu)->as, base + offset, ((pte1 >> 8) & 0xff) | 0x01);
+#endif
 }
 
 static void ppc_hash64_set_c(PowerPCCPU *cpu, hwaddr ptex, uint64_t pte1)
 {
     hwaddr base, offset = ptex * HASH_PTE_SIZE_64 + 15;
 
+#if 0
     if (cpu->vhyp) {
         PPCVirtualHypervisorClass *vhc =
             PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         vhc->hpte_set_c(cpu->vhyp, ptex, pte1);
         return;
     }
+#endif
     base = ppc_hash64_hpt_base(cpu);
 
     /* The HW performs a non-atomic byte update */
-    stb_phys(CPU(cpu)->as, base + offset, (pte1 & 0xff) | 0x80);
+#ifdef UNICORN_ARCH_POSTFIX
+    glue(stb_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + offset, (pte1 & 0xff) | 0x80);
+#else
+    stb_phys(cpu->env.uc, CPU(cpu)->as, base + offset, (pte1 & 0xff) | 0x80);
+#endif
 }
 
 static target_ulong rmls_limit(PowerPCCPU *cpu)
@@ -858,8 +880,10 @@ static int build_vrma_slbe(PowerPCCPU *cpu, ppc_slb_t *slb)
         }
     }
 
+#if 0
     error_report("Bad page size encoding in LPCR[VRMASD]; LPCR=0x"
                  TARGET_FMT_lx"\n", lpcr);
+#endif
 
     return -1;
 }
@@ -896,12 +920,15 @@ int ppc_hash64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr,
          */
         raddr = eaddr & 0x0FFFFFFFFFFFFFFFULL;
 
+#if 0
         if (cpu->vhyp) {
             /*
              * In virtual hypervisor mode, there's nothing to do:
              *   EA == GPA == qemu guest address
              */
-        } else if (msr_hv || !env->has_hv_mode) {
+        } else
+#endif
+        if (msr_hv || !env->has_hv_mode) {
             /* In HV mode, add HRMOR if top EA bit is clear */
             if (!(eaddr >> 63)) {
                 raddr |= env->spr[SPR_HRMOR];
@@ -948,7 +975,7 @@ int ppc_hash64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr,
         /* No entry found, check if in-memory segment tables are in use */
         if (ppc64_use_proc_tbl(cpu)) {
             /* TODO - Unsupported */
-            error_report("Segment Table Support Unimplemented");
+            fprintf(stderr, "Segment Table Support Unimplemented");
             exit(1);
         }
         /* Segment still not found, generate the appropriate interrupt */
@@ -1068,13 +1095,16 @@ hwaddr ppc_hash64_get_phys_page_debug(PowerPCCPU *cpu, target_ulong addr)
         /* In real mode the top 4 effective address bits are ignored */
         raddr = addr & 0x0FFFFFFFFFFFFFFFULL;
 
+#if 0
         if (cpu->vhyp) {
             /*
              * In virtual hypervisor mode, there's nothing to do:
              *   EA == GPA == qemu guest address
              */
             return raddr;
-        } else if ((msr_hv || !env->has_hv_mode) && !(addr >> 63)) {
+        } else
+#endif
+        if ((msr_hv || !env->has_hv_mode) && !(addr >> 63)) {
             /* In HV mode, add HRMOR if top EA bit is clear */
             return raddr | env->spr[SPR_HRMOR];
         } else if (ppc_hash64_use_vrma(env)) {
@@ -1136,11 +1166,15 @@ void helper_store_lpcr(CPUPPCState *env, target_ulong val)
 
 void ppc_hash64_init(PowerPCCPU *cpu)
 {
+#ifndef NDEBUG
     CPUPPCState *env = &cpu->env;
+#endif
     PowerPCCPUClass *pcc = POWERPC_CPU_GET_CLASS(cpu);
 
     if (!pcc->hash64_opts) {
+#ifndef NDEBUG
         assert(!(env->mmu_model & POWERPC_MMU_64));
+#endif
         return;
     }
 

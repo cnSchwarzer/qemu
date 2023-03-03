@@ -2,7 +2,6 @@
 #define QEMU_TIMER_H
 
 #include "qemu/bitops.h"
-#include "qemu/notify.h"
 #include "qemu/host-utils.h"
 
 #define NANOSECONDS_PER_SECOND 1000000000LL
@@ -90,8 +89,6 @@ struct QEMUTimer {
     int attributes;
     int scale;
 };
-
-extern QEMUTimerListGroup main_loop_tlg;
 
 /*
  * qemu_clock_get_ns;
@@ -443,7 +440,7 @@ void timer_init_full(QEMUTimer *ts,
 static inline void timer_init(QEMUTimer *ts, QEMUClockType type, int scale,
                               QEMUTimerCB *cb, void *opaque)
 {
-    timer_init_full(ts, NULL, type, scale, 0, cb, opaque);
+    // timer_init_full(ts, NULL, type, scale, 0, cb, opaque);
 }
 
 /**
@@ -528,7 +525,7 @@ static inline QEMUTimer *timer_new_full(QEMUTimerListGroup *timer_list_group,
                                         QEMUTimerCB *cb, void *opaque)
 {
     QEMUTimer *ts = g_malloc0(sizeof(QEMUTimer));
-    timer_init_full(ts, timer_list_group, type, scale, attributes, cb, opaque);
+    // timer_init_full(ts, timer_list_group, type, scale, attributes, cb, opaque);
     return ts;
 }
 
@@ -721,22 +718,6 @@ bool timer_expired(QEMUTimer *timer_head, int64_t current_time);
  */
 uint64_t timer_expire_time_ns(QEMUTimer *ts);
 
-/**
- * timer_get:
- * @f: the file
- * @ts: the timer
- *
- * Read a timer @ts from a file @f
- */
-void timer_get(QEMUFile *f, QEMUTimer *ts);
-
-/**
- * timer_put:
- * @f: the file
- * @ts: the timer
- */
-void timer_put(QEMUFile *f, QEMUTimer *ts);
-
 /*
  * General utility functions
  */
@@ -751,19 +732,6 @@ void timer_put(QEMUFile *f, QEMUTimer *ts);
  * Returns: millisecond timeout value
  */
 int qemu_timeout_ns_to_ms(int64_t ns);
-
-/**
- * qemu_poll_ns:
- * @fds: Array of file descriptors
- * @nfds: number of file descriptors
- * @timeout: timeout in nanoseconds
- *
- * Perform a poll like g_poll but with a timeout in nanoseconds.
- * See g_poll documentation for further details.
- *
- * Returns: number of fds ready
- */
-int qemu_poll_ns(GPollFD *fds, guint nfds, int64_t timeout);
 
 /**
  * qemu_soonest_timeout:
@@ -809,7 +777,30 @@ static inline int64_t get_max_clock_jump(void)
 /*
  * Low level clock functions
  */
+#ifdef _WIN32
+static inline int64_t get_clock_realtime(void)
+{
+    // code from https://stackoverflow.com/questions/10905892/equivalent-of-gettimeday-for-windows
+    // >>>>>>>>>
+    const uint64_t EPOCH = ((uint64_t)116444736000000000ULL);
 
+    long tv_sec, tv_usec;
+    SYSTEMTIME system_time;
+    FILETIME file_time;
+    uint64_t time;
+
+    GetSystemTime(&system_time);
+    SystemTimeToFileTime(&system_time, &file_time);
+    time = ((uint64_t)file_time.dwLowDateTime);
+    time += ((uint64_t)file_time.dwHighDateTime) << 32;
+
+    tv_sec = (long)((time - EPOCH) / 10000000L);
+    tv_usec = (long)(system_time.wMilliseconds * 1000);
+    // <<<<<<<<<
+
+    return tv_sec * 1000000000LL + (tv_usec * 1000);
+}
+#else
 /* get host real time in nanosecond */
 static inline int64_t get_clock_realtime(void)
 {
@@ -818,6 +809,7 @@ static inline int64_t get_clock_realtime(void)
     gettimeofday(&tv, NULL);
     return tv.tv_sec * 1000000000LL + (tv.tv_usec * 1000);
 }
+#endif
 
 /* Warning: don't insert tracepoints into these functions, they are
    also used by simpletrace backend and tracepoints would cause
@@ -890,15 +882,22 @@ static inline int64_t cpu_get_host_ticks(void)
 
 static inline int64_t cpu_get_host_ticks(void)
 {
+#ifdef _MSC_VER
+    return __rdtsc();
+#else
     int64_t val;
     asm volatile ("rdtsc" : "=A" (val));
     return val;
+#endif
 }
 
 #elif defined(__x86_64__)
 
 static inline int64_t cpu_get_host_ticks(void)
 {
+#ifdef _MSC_VER
+    return __rdtsc();
+#else
     uint32_t low,high;
     int64_t val;
     asm volatile("rdtsc" : "=a" (low), "=d" (high));
@@ -906,6 +905,7 @@ static inline int64_t cpu_get_host_ticks(void)
     val <<= 32;
     val |= low;
     return val;
+#endif
 }
 
 #elif defined(__hppa__)
@@ -1003,13 +1003,6 @@ static inline int64_t cpu_get_host_ticks(void)
 }
 #endif
 
-#ifdef CONFIG_PROFILER
-static inline int64_t profile_getclock(void)
-{
-    return get_clock();
-}
-
-extern int64_t dev_time;
-#endif
+void init_get_clock(void);
 
 #endif

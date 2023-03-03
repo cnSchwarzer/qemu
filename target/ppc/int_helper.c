@@ -21,11 +21,9 @@
 #include "cpu.h"
 #include "internal.h"
 #include "qemu/host-utils.h"
-#include "qemu/main-loop.h"
 #include "exec/helper-proto.h"
 #include "crypto/aes.h"
 #include "fpu/softfloat.h"
-#include "qapi/error.h"
 #include "qemu/guest-random.h"
 
 #include "helper_regs.h"
@@ -77,8 +75,13 @@ target_ulong helper_divwe(CPUPPCState *env, target_ulong ra, target_ulong rb,
     int64_t dividend = (int64_t)ra << 32;
     int64_t divisor = (int64_t)((int32_t)rb);
 
+#ifdef _MSC_VER
+    if (unlikely((divisor == 0) ||
+                 ((divisor == (0ULL - 1ULL)) && (dividend == INT64_MIN)))) {
+#else
     if (unlikely((divisor == 0) ||
                  ((divisor == -1ull) && (dividend == INT64_MIN)))) {
+#endif
         overflow = 1;
     } else {
         rt = dividend / divisor;
@@ -166,13 +169,9 @@ uint32_t helper_cmpeqb(target_ulong ra, target_ulong rb)
  */
 uint64_t helper_darn32(void)
 {
-    Error *err = NULL;
     uint32_t ret;
 
-    if (qemu_guest_getrandom(&ret, sizeof(ret), &err) < 0) {
-        qemu_log_mask(LOG_UNIMP, "darn: Crypto failure: %s",
-                      error_get_pretty(err));
-        error_free(err);
+    if (qemu_guest_getrandom(&ret, sizeof(ret)) < 0) {
         return -1;
     }
 
@@ -181,13 +180,9 @@ uint64_t helper_darn32(void)
 
 uint64_t helper_darn64(void)
 {
-    Error *err = NULL;
     uint64_t ret;
 
-    if (qemu_guest_getrandom(&ret, sizeof(ret), &err) < 0) {
-        qemu_log_mask(LOG_UNIMP, "darn: Crypto failure: %s",
-                      error_get_pretty(err));
-        error_free(err);
+    if (qemu_guest_getrandom(&ret, sizeof(ret)) < 0) {
         return -1;
     }
 
@@ -203,7 +198,7 @@ uint64_t helper_bpermd(uint64_t rs, uint64_t rb)
         int index = (rs >> (i * 8)) & 0xFF;
         if (index < 64) {
             if (rb & PPC_BIT(index)) {
-                ra |= 1 << i;
+                ra |= 1ULL << i;
             }
         }
     }
@@ -394,7 +389,6 @@ target_ulong helper_divso(CPUPPCState *env, target_ulong arg1,
  *                      -arg / 256
  * return 256 * log10(10           + 1.0) + 0.5
  */
-#if !defined(CONFIG_USER_ONLY)
 target_ulong helper_602_mfrom(target_ulong arg)
 {
     if (likely(arg < 602)) {
@@ -404,7 +398,6 @@ target_ulong helper_602_mfrom(target_ulong arg)
         return 0;
     }
 }
-#endif
 
 /*****************************************************************************/
 /* Altivec extension helpers */
@@ -657,7 +650,7 @@ VABSDU(w, u32)
                                                                         \
         for (i = 0; i < ARRAY_SIZE(r->f32); i++) {                      \
             float32 t = cvt(b->element[i], &env->vec_status);           \
-            r->f32[i] = float32_scalbn(t, -uim, &env->vec_status);      \
+            r->f32[i] = float32_scalbn(t, 0 - uim, &env->vec_status);   \
         }                                                               \
     }
 VCF(ux, uint32_to_float32, u32)
@@ -1575,7 +1568,7 @@ VEXTRACT(d, u64)
 void helper_xxextractuw(CPUPPCState *env, ppc_vsr_t *xt,
                         ppc_vsr_t *xb, uint32_t index)
 {
-    ppc_vsr_t t = { };
+    ppc_vsr_t t = { 0 };
     size_t es = sizeof(uint32_t);
     uint32_t ext_index;
     int i;
@@ -2015,7 +2008,11 @@ void helper_vsubcuq(ppc_avr_t *r, ppc_avr_t *a, ppc_avr_t *b)
         ppc_avr_t tmp;
         avr_qw_not(&tmp, *b);
         avr_qw_add(&tmp, *a, tmp);
+#ifdef _MSC_VER
+        carry = ((tmp.VsrSD(0) == (0ULL - 1ULL)) && (tmp.VsrSD(1) == (0ULL - 1ULL)));
+#else
         carry = ((tmp.VsrSD(0) == -1ull) && (tmp.VsrSD(1) == -1ull));
+#endif
     }
     r->VsrD(0) = 0;
     r->VsrD(1) = carry;
@@ -2035,7 +2032,11 @@ void helper_vsubecuq(ppc_avr_t *r, ppc_avr_t *a, ppc_avr_t *b, ppc_avr_t *c)
         ppc_avr_t tmp;
         avr_qw_not(&tmp, *b);
         avr_qw_add(&tmp, *a, tmp);
+#ifdef _MSC_VER
+        carry_out = ((tmp.VsrD(0) == (0ULL - 1ULL)) && (tmp.VsrD(1) == (0ULL - 1ULL)));
+#else
         carry_out = ((tmp.VsrD(0) == -1ull) && (tmp.VsrD(1) == -1ull));
+#endif
     }
 
     r->VsrD(0) = 0;
@@ -2489,7 +2490,11 @@ uint32_t helper_bcdctsq(ppc_avr_t *r, ppc_avr_t *b, uint32_t ps)
     }
 
     if (sgnb == -1) {
+#ifdef _MSC_VER
+        r->VsrSD(1) = 0 - lo_value;
+#else
         r->VsrSD(1) = -lo_value;
+#endif
         r->VsrSD(0) = ~hi_value + !r->VsrSD(1);
     } else {
         r->VsrSD(1) = lo_value;

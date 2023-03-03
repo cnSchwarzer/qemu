@@ -11,18 +11,21 @@
 
 #include "qemu/osdep.h"
 #include "qemu/cutils.h"
-#include "qapi/error.h"
+//#include "qapi/error.h"
 #include "qemu/guest-random.h"
 #include "crypto/random.h"
-#include "sysemu/replay.h"
+//#include "sysemu/replay.h"
 
 
+#ifndef _MSC_VER
 static __thread GRand *thread_rand;
-static bool deterministic;
+#endif
+static bool deterministic = true;
 
 
 static int glib_random_bytes(void *buf, size_t len)
 {
+#ifndef _MSC_VER
     GRand *rand = thread_rand;
     size_t i;
     uint32_t x;
@@ -40,31 +43,18 @@ static int glib_random_bytes(void *buf, size_t len)
         x = g_rand_int(rand);
         __builtin_memcpy(buf + i, &x, i - len);
     }
+#endif
     return 0;
 }
 
-int qemu_guest_getrandom(void *buf, size_t len, Error **errp)
+int qemu_guest_getrandom(void *buf, size_t len)
 {
-    int ret;
-    if (replay_mode == REPLAY_MODE_PLAY) {
-        return replay_read_random(buf, len);
-    }
-    if (unlikely(deterministic)) {
-        /* Deterministic implementation using Glib's Mersenne Twister.  */
-        ret = glib_random_bytes(buf, len);
-    } else {
-        /* Non-deterministic implementation using crypto routines.  */
-        ret = qcrypto_random_bytes(buf, len, errp);
-    }
-    if (replay_mode == REPLAY_MODE_RECORD) {
-        replay_save_random(ret, buf, len);
-    }
-    return ret;
+    return glib_random_bytes(buf, len);
 }
 
 void qemu_guest_getrandom_nofail(void *buf, size_t len)
 {
-    (void)qemu_guest_getrandom(buf, len, &error_fatal);
+    (void)qemu_guest_getrandom(buf, len);
 }
 
 uint64_t qemu_guest_random_seed_thread_part1(void)
@@ -79,23 +69,13 @@ uint64_t qemu_guest_random_seed_thread_part1(void)
 
 void qemu_guest_random_seed_thread_part2(uint64_t seed)
 {
+#ifndef _MSC_VER
     g_assert(thread_rand == NULL);
     if (deterministic) {
         thread_rand =
             g_rand_new_with_seed_array((const guint32 *)&seed,
                                        sizeof(seed) / sizeof(guint32));
     }
+#endif
 }
 
-int qemu_guest_random_seed_main(const char *optarg, Error **errp)
-{
-    unsigned long long seed;
-    if (parse_uint_full(optarg, &seed, 0)) {
-        error_setg(errp, "Invalid seed number: %s", optarg);
-        return -1;
-    } else {
-        deterministic = true;
-        qemu_guest_random_seed_thread_part2(seed);
-        return 0;
-    }
-}

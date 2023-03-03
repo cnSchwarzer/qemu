@@ -12,7 +12,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/module.h"
 #include "cpu_features.h"
 
 #define DEF_FEAT(_FEAT, _NAME, _TYPE, _BIT, _DESC) \
@@ -199,7 +198,7 @@ const S390FeatGroupDef *s390_feat_group_def(S390FeatGroup group)
     return &s390_feature_groups[group];
 }
 
-static void init_groups(void)
+void init_groups(void)
 {
     int i;
 
@@ -209,5 +208,3 @@ static void init_groups(void)
                               s390_feature_groups[i].feat);
     }
 }
-
-type_init(init_groups)

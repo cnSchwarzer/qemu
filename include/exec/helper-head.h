@@ -80,9 +80,9 @@
 
 #define dh_retvar_void NULL
 #define dh_retvar_noreturn NULL
-#define dh_retvar_i32 tcgv_i32_temp(retval)
-#define dh_retvar_i64 tcgv_i64_temp(retval)
-#define dh_retvar_ptr tcgv_ptr_temp(retval)
+#define dh_retvar_i32 tcgv_i32_temp(tcg_ctx, retval)
+#define dh_retvar_i64 tcgv_i64_temp(tcg_ctx, retval)
+#define dh_retvar_ptr tcgv_ptr_temp(tcg_ctx, retval)
 #define dh_retvar(t) glue(dh_retvar_, dh_alias(t))
 
 #define dh_is_64bit_void 0
@@ -130,7 +130,7 @@
   ((dh_is_64bit(t) << (n*2)) | (dh_is_signed(t) << (n*2+1)))
 
 #define dh_arg(t, n) \
-  glue(glue(tcgv_, dh_alias(t)), _temp)(glue(arg, n))
+  glue(glue(tcgv_, dh_alias(t)), _temp)(tcg_ctx, glue(arg, n))
 
 #define dh_arg_decl(t, n) glue(TCGv_, dh_alias(t)) glue(arg, n)
 

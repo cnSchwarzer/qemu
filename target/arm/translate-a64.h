@@ -19,6 +19,7 @@
 #define TARGET_ARM_TRANSLATE_A64_H
 
 void unallocated_encoding(DisasContext *s);
+typedef struct TCGContext TCGContext;
 
 #define unsupported_encoding(s, insn)                                    \
     do {                                                                 \
@@ -36,7 +37,7 @@ TCGv_i64 cpu_reg_sp(DisasContext *s, int reg);
 TCGv_i64 read_cpu_reg(DisasContext *s, int reg, int sf);
 TCGv_i64 read_cpu_reg_sp(DisasContext *s, int reg, int sf);
 void write_fp_dreg(DisasContext *s, int reg, TCGv_i64 v);
-TCGv_ptr get_fpstatus_ptr(bool);
+TCGv_ptr get_fpstatus_ptr(TCGContext *tcg_ctx, bool);
 bool logic_imm_decode_wmask(uint64_t *result, unsigned int immn,
                             unsigned int imms, unsigned int immr);
 bool sve_access_check(DisasContext *s);
@@ -102,8 +103,9 @@ static inline int vec_full_reg_offset(DisasContext *s, int regno)
 /* Return a newly allocated pointer to the vector register.  */
 static inline TCGv_ptr vec_full_reg_ptr(DisasContext *s, int regno)
 {
-    TCGv_ptr ret = tcg_temp_new_ptr();
-    tcg_gen_addi_ptr(ret, cpu_env, vec_full_reg_offset(s, regno));
+    TCGContext *tcg_ctx = s->uc->tcg_ctx;
+    TCGv_ptr ret = tcg_temp_new_ptr(tcg_ctx);
+    tcg_gen_addi_ptr(tcg_ctx, ret, tcg_ctx->cpu_env, vec_full_reg_offset(s, regno));
     return ret;
 }
 
@@ -116,12 +118,12 @@ static inline int vec_full_reg_size(DisasContext *s)
 bool disas_sve(DisasContext *, uint32_t);
 
 /* Note that the gvec expanders operate on offsets + sizes.  */
-typedef void GVecGen2Fn(unsigned, uint32_t, uint32_t, uint32_t, uint32_t);
-typedef void GVecGen2iFn(unsigned, uint32_t, uint32_t, int64_t,
+typedef void GVecGen2Fn(TCGContext *, unsigned, uint32_t, uint32_t, uint32_t, uint32_t);
+typedef void GVecGen2iFn(TCGContext *, unsigned, uint32_t, uint32_t, int64_t,
                          uint32_t, uint32_t);
-typedef void GVecGen3Fn(unsigned, uint32_t, uint32_t,
+typedef void GVecGen3Fn(TCGContext *, unsigned, uint32_t, uint32_t,
                         uint32_t, uint32_t, uint32_t);
-typedef void GVecGen4Fn(unsigned, uint32_t, uint32_t, uint32_t,
+typedef void GVecGen4Fn(TCGContext *, unsigned, uint32_t, uint32_t, uint32_t,
                         uint32_t, uint32_t, uint32_t);
 
 #endif /* TARGET_ARM_TRANSLATE_A64_H */

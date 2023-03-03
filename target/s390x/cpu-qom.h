@@ -22,14 +22,9 @@
 
 #include "hw/core/cpu.h"
 
-#define TYPE_S390_CPU "s390x-cpu"
-
-#define S390_CPU_CLASS(klass) \
-    OBJECT_CLASS_CHECK(S390CPUClass, (klass), TYPE_S390_CPU)
-#define S390_CPU(obj) \
-    OBJECT_CHECK(S390CPU, (obj), TYPE_S390_CPU)
-#define S390_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(S390CPUClass, (obj), TYPE_S390_CPU)
+#define S390_CPU(obj) ((S390CPU *)obj)
+#define S390_CPU_CLASS(klass) ((S390CPUClass *)klass)
+#define S390_CPU_GET_CLASS(obj) (&((S390CPU *)obj)->cc)
 
 typedef struct S390CPUModel S390CPUModel;
 typedef struct S390CPUDef S390CPUDef;
@@ -55,15 +50,12 @@ typedef struct S390CPUClass {
     CPUClass parent_class;
     /*< public >*/
     const S390CPUDef *cpu_def;
-    bool kvm_required;
     bool is_static;
-    bool is_migration_safe;
-    const char *desc;
+    // const char *desc; qq
 
-    DeviceRealize parent_realize;
-    DeviceReset parent_reset;
     void (*load_normal)(CPUState *cpu);
     void (*reset)(CPUState *cpu, cpu_reset_type type);
+    void (*parent_reset)(CPUState *cpu);
 } S390CPUClass;
 
 typedef struct S390CPU S390CPU;

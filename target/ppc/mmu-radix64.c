@@ -21,10 +21,6 @@
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "exec/helper-proto.h"
-#include "qemu/error-report.h"
-#include "sysemu/kvm.h"
-#include "kvm_ppc.h"
-#include "exec/log.h"
 #include "mmu-radix64.h"
 #include "mmu-book3s-v3.h"
 
@@ -158,7 +154,11 @@ static void ppc_radix64_set_rc(PowerPCCPU *cpu, int rwx, uint64_t pte,
     }
 
     if (pte ^ npte) { /* If pte has changed then write it back */
-        stq_phys(cs->as, pte_addr, npte);
+#ifdef UNICORN_ARCH_POSTFIX
+        glue(stq_phys, UNICORN_ARCH_POSTFIX)(cs->uc, cs->as, pte_addr, npte);
+#else
+        stq_phys(cs->uc, cs->as, pte_addr, npte);
+#endif
     }
 }
 
@@ -178,7 +178,11 @@ static uint64_t ppc_radix64_walk_tree(PowerPCCPU *cpu, vaddr eaddr,
     /* Read page <directory/table> entry from guest address space */
     index = eaddr >> (*psize - nls); /* Shift */
     index &= ((1UL << nls) - 1); /* Mask */
-    pde = ldq_phys(cs->as, base_addr + (index * sizeof(pde)));
+#ifdef UNICORN_ARCH_POSTFIX
+    pde = glue(ldq_phys, UNICORN_ARCH_POSTFIX)(cs->uc, cs->as, base_addr + (index * sizeof(pde)));
+#else
+    pde = ldq_phys(cs->uc, cs->as, base_addr + (index * sizeof(pde)));
+#endif
     if (!(pde & R_PTE_VALID)) { /* Invalid Entry */
         *fault_cause |= DSISR_NOPTE;
         return 0;
@@ -221,7 +225,9 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
 {
     CPUState *cs = CPU(cpu);
     CPUPPCState *env = &cpu->env;
+#if 0
     PPCVirtualHypervisorClass *vhc;
+#endif
     hwaddr raddr, pte_addr;
     uint64_t lpid = 0, pid = 0, offset, size, prtbe0, pte;
     int page_size, prot, fault_cause = 0;
@@ -230,7 +236,7 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
     assert((rwx == 0) || (rwx == 1) || (rwx == 2));
 
     /* HV or virtual hypervisor Real Mode Access */
-    if ((msr_hv || cpu->vhyp) &&
+    if ((msr_hv) &&
         (((rwx == 2) && (msr_ir == 0)) || ((rwx != 2) && (msr_dr == 0)))) {
         /* In real mode top 4 effective addr bits (mostly) ignored */
         raddr = eaddr & 0x0FFFFFFFFFFFFFFFULL;
@@ -251,11 +257,13 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
      * Check UPRT (we avoid the check in real mode to deal with
      * transitional states during kexec.
      */
+#if 0
     if (!ppc64_use_proc_tbl(cpu)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "LPCR:UPRT not set in radix mode ! LPCR="
                       TARGET_FMT_lx "\n", env->spr[SPR_LPCR]);
     }
+#endif
 
     /* Virtual Mode Access - get the fully qualified address */
     if (!ppc_radix64_get_fully_qualified_addr(env, eaddr, &lpid, &pid)) {
@@ -264,10 +272,12 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
     }
 
     /* Get Process Table */
+#if 0
     if (cpu->vhyp) {
         vhc = PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         vhc->get_pate(cpu->vhyp, &pate);
     } else {
+#endif
         if (!ppc64_v3_get_pate(cpu, lpid, &pate)) {
             ppc_radix64_raise_si(cpu, rwx, eaddr, DSISR_NOPTE);
             return 1;
@@ -277,10 +287,12 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
         }
         /* We don't support guest mode yet */
         if (lpid != 0) {
-            error_report("PowerNV guest support Unimplemented");
+            fprintf(stderr, "PowerNV guest support Unimplemented");
             exit(1);
        }
+#if 0
     }
+#endif
 
     /* Index Process Table by PID to Find Corresponding Process Table Entry */
     offset = pid * sizeof(struct prtb_entry);
@@ -290,7 +302,11 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
         ppc_radix64_raise_si(cpu, rwx, eaddr, DSISR_NOPTE);
         return 1;
     }
-    prtbe0 = ldq_phys(cs->as, (pate.dw1 & PATE1_R_PRTB) + offset);
+#ifdef UNICORN_ARCH_POSTFIX
+    prtbe0 = glue(ldq_phys, UNICORN_ARCH_POSTFIX)(cs->uc, cs->as, (pate.dw1 & PATE1_R_PRTB) + offset);
+#else
+    prtbe0 = ldq_phys(cs->uc, cs->as, (pate.dw1 & PATE1_R_PRTB) + offset);
+#endif
 
     /* Walk Radix Tree from Process Table Entry to Convert EA to RA */
     page_size = PRTBE_R_GET_RTS(prtbe0);
@@ -307,7 +323,7 @@ int ppc_radix64_handle_mmu_fault(PowerPCCPU *cpu, vaddr eaddr, int rwx,
     ppc_radix64_set_rc(cpu, rwx, pte, pte_addr, &prot);
 
     tlb_set_page(cs, eaddr & TARGET_PAGE_MASK, raddr & TARGET_PAGE_MASK,
-                 prot, mmu_idx, 1UL << page_size);
+                 prot, mmu_idx, 1ULL << page_size);
     return 0;
 }
 
@@ -315,7 +331,9 @@ hwaddr ppc_radix64_get_phys_page_debug(PowerPCCPU *cpu, target_ulong eaddr)
 {
     CPUState *cs = CPU(cpu);
     CPUPPCState *env = &cpu->env;
+#if 0
     PPCVirtualHypervisorClass *vhc;
+#endif
     hwaddr raddr, pte_addr;
     uint64_t lpid = 0, pid = 0, offset, size, prtbe0, pte;
     int page_size, fault_cause = 0;
@@ -333,10 +351,12 @@ hwaddr ppc_radix64_get_phys_page_debug(PowerPCCPU *cpu, target_ulong eaddr)
     }
 
     /* Get Process Table */
+#if 0
     if (cpu->vhyp) {
         vhc = PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
         vhc->get_pate(cpu->vhyp, &pate);
     } else {
+#endif
         if (!ppc64_v3_get_pate(cpu, lpid, &pate)) {
             return -1;
         }
@@ -345,10 +365,12 @@ hwaddr ppc_radix64_get_phys_page_debug(PowerPCCPU *cpu, target_ulong eaddr)
         }
         /* We don't support guest mode yet */
         if (lpid != 0) {
-            error_report("PowerNV guest support Unimplemented");
+            fprintf(stderr, "PowerNV guest support Unimplemented");
             exit(1);
        }
+#if 0
     }
+#endif
 
     /* Index Process Table by PID to Find Corresponding Process Table Entry */
     offset = pid * sizeof(struct prtb_entry);
@@ -357,7 +379,11 @@ hwaddr ppc_radix64_get_phys_page_debug(PowerPCCPU *cpu, target_ulong eaddr)
         /* offset exceeds size of the process table */
         return -1;
     }
-    prtbe0 = ldq_phys(cs->as, (pate.dw1 & PATE1_R_PRTB) + offset);
+#ifdef UNICORN_ARCH_POSTFIX
+    prtbe0 = glue(ldq_phys, UNICORN_ARCH_POSTFIX)(cs->uc, cs->as, (pate.dw1 & PATE1_R_PRTB) + offset);
+#else
+    prtbe0 = ldq_phys(cs->uc, cs->as, (pate.dw1 & PATE1_R_PRTB) + offset);
+#endif
 
     /* Walk Radix Tree from Process Table Entry to Convert EA to RA */
     page_size = PRTBE_R_GET_RTS(prtbe0);

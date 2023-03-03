@@ -10,8 +10,6 @@
 #include "internals.h"
 #include "exec/exec-all.h"
 
-#if !defined(CONFIG_USER_ONLY)
-
 static inline uint32_t merge_syn_data_abort(uint32_t template_syn,
                                             unsigned int target_el,
                                             bool same_el, bool ea,
@@ -113,7 +111,7 @@ void arm_cpu_do_unaligned_access(CPUState *cs, vaddr vaddr,
                                  int mmu_idx, uintptr_t retaddr)
 {
     ARMCPU *cpu = ARM_CPU(cs);
-    ARMMMUFaultInfo fi = {};
+    ARMMMUFaultInfo fi = { 0 };
 
     /* now we have a real cpu fault */
     cpu_restore_state(cs, retaddr, true);
@@ -134,7 +132,7 @@ void arm_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                    MemTxResult response, uintptr_t retaddr)
 {
     ARMCPU *cpu = ARM_CPU(cs);
-    ARMMMUFaultInfo fi = {};
+    ARMMMUFaultInfo fi = { 0 };
 
     /* now we have a real cpu fault */
     cpu_restore_state(cs, retaddr, true);
@@ -144,28 +142,18 @@ void arm_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
     arm_deliver_fault(cpu, addr, access_type, mmu_idx, &fi);
 }
 
-#endif /* !defined(CONFIG_USER_ONLY) */
-
 bool arm_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                       MMUAccessType access_type, int mmu_idx,
                       bool probe, uintptr_t retaddr)
 {
+    struct uc_struct *uc = cs->uc;
     ARMCPU *cpu = ARM_CPU(cs);
 
-#ifdef CONFIG_USER_ONLY
-    cpu->env.exception.vaddress = address;
-    if (access_type == MMU_INST_FETCH) {
-        cs->exception_index = EXCP_PREFETCH_ABORT;
-    } else {
-        cs->exception_index = EXCP_DATA_ABORT;
-    }
-    cpu_loop_exit_restore(cs, retaddr);
-#else
     hwaddr phys_addr;
     target_ulong page_size;
     int prot, ret;
-    MemTxAttrs attrs = {};
-    ARMMMUFaultInfo fi = {};
+    MemTxAttrs attrs = { 0 };
+    ARMMMUFaultInfo fi = { 0 };
 
     /*
      * Walk the page table and (if the mapping exists) add the page
@@ -196,5 +184,4 @@ bool arm_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
         cpu_restore_state(cs, retaddr, true);
         arm_deliver_fault(cpu, address, access_type, mmu_idx, &fi);
     }
-#endif
 }

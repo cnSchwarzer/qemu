@@ -20,10 +20,11 @@
 #ifndef ARM_CPU_H
 #define ARM_CPU_H
 
-#include "kvm-consts.h"
 #include "hw/registerfields.h"
 #include "cpu-qom.h"
 #include "exec/cpu-defs.h"
+
+struct uc_struct;
 
 /* ARM processors have a weak memory model */
 #define TCG_GUEST_DEFAULT_MO      (0)
@@ -125,25 +126,6 @@ enum {
    s<2n+1> maps to the most significant half of d<n>
  */
 
-/**
- * DynamicGDBXMLInfo:
- * @desc: Contains the XML descriptions.
- * @num: Number of the registers in this XML seen by GDB.
- * @data: A union with data specific to the set of registers
- *    @cpregs_keys: Array that contains the corresponding Key of
- *                  a given cpreg with the same order of the cpreg
- *                  in the XML description.
- */
-typedef struct DynamicGDBXMLInfo {
-    char *desc;
-    int num;
-    union {
-        struct {
-            uint32_t *keys;
-        } cpregs;
-    } data;
-} DynamicGDBXMLInfo;
-
 /* CPU state for each instance of a generic timer (in cp15 c14) */
 typedef struct ARMGenericTimer {
     uint64_t cval; /* Timer CompareValue register */
@@ -191,10 +173,10 @@ typedef struct {
 
 #ifdef TARGET_AARCH64
 # define ARM_MAX_VQ    16
-void arm_cpu_sve_finalize(ARMCPU *cpu, Error **errp);
+//void arm_cpu_sve_finalize(ARMCPU *cpu);
 #else
 # define ARM_MAX_VQ    1
-static inline void arm_cpu_sve_finalize(ARMCPU *cpu, Error **errp) { }
+//static inline void arm_cpu_sve_finalize(ARMCPU *cpu) { }
 #endif
 
 typedef struct ARMVectorReg {
@@ -645,16 +627,12 @@ typedef struct CPUARMState {
     } keys;
 #endif
 
-#if defined(CONFIG_USER_ONLY)
-    /* For usermode syscall translation.  */
-    int eabi;
-#endif
-
-    struct CPUBreakpoint *cpu_breakpoint[16];
-    struct CPUWatchpoint *cpu_watchpoint[16];
-
     /* Fields up to this point are cleared by a CPU reset */
+#ifndef _MSC_VER
     struct {} end_reset_fields;
+#else
+    int end_reset_fields;
+#endif
 
     /* Fields after this point are preserved across CPU reset. */
 
@@ -694,6 +672,12 @@ typedef struct CPUARMState {
     const struct arm_boot_info *boot_info;
     /* Store GICv3CPUState to access from this struct */
     void *gicv3state;
+
+    struct CPUBreakpoint *cpu_breakpoint[16];
+    struct CPUWatchpoint *cpu_watchpoint[16];
+
+    // Unicorn engine
+    struct uc_struct *uc;
 } CPUARMState;
 
 /**
@@ -755,31 +739,26 @@ struct ARMCPU {
     uint64_t *cpreg_vmstate_values;
     int32_t cpreg_vmstate_array_len;
 
-    DynamicGDBXMLInfo dyn_sysreg_xml;
-    DynamicGDBXMLInfo dyn_svereg_xml;
-
     /* Timers used by the generic (architected) timer */
-    QEMUTimer *gt_timer[NUM_GTIMERS];
+    // QEMUTimer *gt_timer[NUM_GTIMERS];
     /*
      * Timer used by the PMU. Its state is restored after migration by
      * pmu_op_finish() - it does not need other handling during migration
      */
-    QEMUTimer *pmu_timer;
+    // QEMUTimer *pmu_timer;
+
     /* GPIO outputs for generic timer */
-    qemu_irq gt_timer_outputs[NUM_GTIMERS];
+    //qemu_irq gt_timer_outputs[NUM_GTIMERS];
     /* GPIO output for GICv3 maintenance interrupt signal */
-    qemu_irq gicv3_maintenance_interrupt;
+    //qemu_irq gicv3_maintenance_interrupt;
     /* GPIO output for the PMU interrupt */
-    qemu_irq pmu_interrupt;
+    //qemu_irq pmu_interrupt;
 
     /* MemoryRegion to use for secure physical accesses */
     MemoryRegion *secure_memory;
 
     /* For v8M, pointer to the IDAU interface provided by board/SoC */
-    Object *idau;
-
-    /* 'compatible' string for this CPU for Linux device trees */
-    const char *dtb_compatible;
+    void *idau;
 
     /* PSCI version for this CPU
      * Bits[31:16] = Major Version
@@ -820,21 +799,6 @@ struct ARMCPU {
 
     /* For v8M, initial value of the Secure VTOR */
     uint32_t init_svtor;
-
-    /* [QEMU_]KVM_ARM_TARGET_* constant for this CPU, or
-     * QEMU_KVM_ARM_TARGET_NONE if the kernel doesn't support this CPU type.
-     */
-    uint32_t kvm_target;
-
-    /* KVM init features for this CPU */
-    uint32_t kvm_init_features[7];
-
-    /* KVM CPU state */
-
-    /* KVM virtual time adjustment */
-    bool kvm_adjvtime;
-    bool kvm_vtime_dirty;
-    uint64_t kvm_vtime;
 
     /* Uniprocessor system with MP extensions */
     bool mp_is_up;
@@ -956,17 +920,11 @@ struct ARMCPU {
 
     /* Generic timer counter frequency, in Hz */
     uint64_t gt_cntfrq_hz;
+
+    struct ARMCPUClass cc;
 };
 
 unsigned int gt_cntfrq_period_ns(ARMCPU *cpu);
-
-void arm_cpu_post_init(Object *obj);
-
-uint64_t arm_cpu_mp_affinity(int idx, uint8_t clustersz);
-
-#ifndef CONFIG_USER_ONLY
-extern const VMStateDescription vmstate_arm_cpu;
-#endif
 
 void arm_cpu_do_interrupt(CPUState *cpu);
 void arm_v7m_cpu_do_interrupt(CPUState *cpu);
@@ -975,9 +933,6 @@ bool arm_cpu_exec_interrupt(CPUState *cpu, int int_req);
 hwaddr arm_cpu_get_phys_page_attrs_debug(CPUState *cpu, vaddr addr,
                                          MemTxAttrs *attrs);
 
-int arm_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
-int arm_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
-
 /*
  * Helpers to dynamically generates XML descriptions of the sysregs
  * and SVE registers. Returns the number of registers in each set.
@@ -985,24 +940,11 @@ int arm_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 int arm_gen_dynamic_sysreg_xml(CPUState *cpu, int base_reg);
 int arm_gen_dynamic_svereg_xml(CPUState *cpu, int base_reg);
 
-/* Returns the dynamically generated XML for the gdb stub.
- * Returns a pointer to the XML contents for the specified XML file or NULL
- * if the XML name doesn't match the predefined one.
- */
-const char *arm_gdb_get_dynamic_xml(CPUState *cpu, const char *xmlname);
-
-int arm_cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cs,
-                             int cpuid, void *opaque);
-int arm_cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cs,
-                             int cpuid, void *opaque);
-
 #ifdef TARGET_AARCH64
-int aarch64_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
-int aarch64_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 void aarch64_sve_narrow_vq(CPUARMState *env, unsigned vq);
 void aarch64_sve_change_el(CPUARMState *env, int old_el,
                            int new_el, bool el0_a64);
-void aarch64_add_sve_properties(Object *obj);
+void aarch64_add_sve_properties(void *obj);
 
 /*
  * SVE registers are encoded in KVM's memory in an endianness-invariant format.
@@ -1033,17 +975,11 @@ static inline void aarch64_sve_narrow_vq(CPUARMState *env, unsigned vq) { }
 static inline void aarch64_sve_change_el(CPUARMState *env, int o,
                                          int n, bool a)
 { }
-static inline void aarch64_add_sve_properties(Object *obj) { }
+static inline void aarch64_add_sve_properties(void *obj) { }
 #endif
 
-#if !defined(CONFIG_TCG)
-static inline target_ulong do_arm_semihosting(CPUARMState *env)
-{
-    g_assert_not_reached();
-}
-#else
 target_ulong do_arm_semihosting(CPUARMState *env);
-#endif
+
 void aarch64_sync_32_to_64(CPUARMState *env);
 void aarch64_sync_64_to_32(CPUARMState *env);
 
@@ -1209,7 +1145,7 @@ void pmu_init(ARMCPU *cpu);
 #define CPSR_C (1U << 29)
 #define CPSR_Z (1U << 30)
 #define CPSR_N (1U << 31)
-#define CPSR_NZCV (CPSR_N | CPSR_Z | CPSR_C | CPSR_V)
+#define CPSR_NZCV  (CPSR_N | CPSR_Z | CPSR_C | CPSR_V)
 #define CPSR_AIF (CPSR_A | CPSR_I | CPSR_F)
 
 #define CPSR_IT (CPSR_IT_0_1 | CPSR_IT_2_7)
@@ -1328,6 +1264,7 @@ typedef enum CPSRWriteType {
     CPSRWriteExceptionReturn = 1, /* from guest exception return insn */
     CPSRWriteRaw = 2,             /* trust values, do not switch reg banks */
     CPSRWriteByGDBStub = 3,       /* from the GDB stub */
+    CPSRWriteByUnicorn = 4        /* from uc_reg_write */
 } CPSRWriteType;
 
 /* Set the CPSR.  Note that some bits of mask must be all-set or all-clear.*/
@@ -1362,7 +1299,6 @@ static inline void xpsr_write(CPUARMState *env, uint32_t val, uint32_t mask)
     if (mask & XPSR_GE) {
         env->GE = (val & XPSR_GE) >> 16;
     }
-#ifndef CONFIG_USER_ONLY
     if (mask & XPSR_T) {
         env->thumb = ((val & XPSR_T) != 0);
     }
@@ -1378,7 +1314,6 @@ static inline void xpsr_write(CPUARMState *env, uint32_t val, uint32_t mask)
         /* Note that this only happens on exception exit */
         write_v7m_exception(env, val & XPSR_EXCP);
     }
-#endif
 }
 
 #define HCR_VM        (1ULL << 0)
@@ -1768,6 +1703,34 @@ FIELD(ID_AA64ISAR0, SHA2, 12, 4)
 FIELD(ID_AA64ISAR0, CRC32, 16, 4)
 FIELD(ID_AA64ISAR0, ATOMIC, 20, 4)
 FIELD(ID_AA64ISAR0, RDM, 28, 4)
+#ifdef _MSC_VER
+/* warning C4309: 'initializing': truncation of constant value.
+    enum is 32bit in MSVC. */
+#define R_ID_AA64ISAR0_SHA3_SHIFT   32
+#define R_ID_AA64ISAR0_SHA3_LENGTH  4
+#define R_ID_AA64ISAR0_SHA3_MASK    MAKE_64BIT_MASK(R_ID_AA64ISAR0_SHA3_SHIFT, R_ID_AA64ISAR0_SHA3_LENGTH)
+#define R_ID_AA64ISAR0_SM3_SHIFT    36
+#define R_ID_AA64ISAR0_SM3_LENGTH   4
+#define R_ID_AA64ISAR0_SM3_MASK     MAKE_64BIT_MASK(R_ID_AA64ISAR0_SM3_SHIFT, R_ID_AA64ISAR0_SM3_LENGTH)
+#define R_ID_AA64ISAR0_SM4_SHIFT    40
+#define R_ID_AA64ISAR0_SM4_LENGTH   4
+#define R_ID_AA64ISAR0_SM4_MASK     MAKE_64BIT_MASK(R_ID_AA64ISAR0_SM4_SHIFT, R_ID_AA64ISAR0_SM4_LENGTH)
+#define R_ID_AA64ISAR0_DP_SHIFT     44
+#define R_ID_AA64ISAR0_DP_LENGTH    4
+#define R_ID_AA64ISAR0_DP_MASK      MAKE_64BIT_MASK(R_ID_AA64ISAR0_DP_SHIFT, R_ID_AA64ISAR0_DP_LENGTH)
+#define R_ID_AA64ISAR0_FHM_SHIFT    48
+#define R_ID_AA64ISAR0_FHM_LENGTH   4
+#define R_ID_AA64ISAR0_FHM_MASK     MAKE_64BIT_MASK(R_ID_AA64ISAR0_FHM_SHIFT, R_ID_AA64ISAR0_FHM_LENGTH)
+#define R_ID_AA64ISAR0_TS_SHIFT     52
+#define R_ID_AA64ISAR0_TS_LENGTH    4
+#define R_ID_AA64ISAR0_TS_MASK      MAKE_64BIT_MASK(R_ID_AA64ISAR0_TS_SHIFT, R_ID_AA64ISAR0_TS_LENGTH)
+#define R_ID_AA64ISAR0_TLB_SHIFT    56
+#define R_ID_AA64ISAR0_TLB_LENGTH   4
+#define R_ID_AA64ISAR0_TLB_MASK     MAKE_64BIT_MASK(R_ID_AA64ISAR0_TLB_SHIFT, R_ID_AA64ISAR0_TLB_LENGTH)
+#define R_ID_AA64ISAR0_RNDR_SHIFT   60
+#define R_ID_AA64ISAR0_RNDR_LENGTH  4
+#define R_ID_AA64ISAR0_RNDR_MASK    MAKE_64BIT_MASK(R_ID_AA64ISAR0_RNDR_SHIFT, R_ID_AA64ISAR0_RNDR_LENGTH)
+#else
 FIELD(ID_AA64ISAR0, SHA3, 32, 4)
 FIELD(ID_AA64ISAR0, SM3, 36, 4)
 FIELD(ID_AA64ISAR0, SM4, 40, 4)
@@ -1776,6 +1739,7 @@ FIELD(ID_AA64ISAR0, FHM, 48, 4)
 FIELD(ID_AA64ISAR0, TS, 52, 4)
 FIELD(ID_AA64ISAR0, TLB, 56, 4)
 FIELD(ID_AA64ISAR0, RNDR, 60, 4)
+#endif
 
 FIELD(ID_AA64ISAR1, DPB, 0, 4)
 FIELD(ID_AA64ISAR1, APA, 4, 4)
@@ -1785,9 +1749,21 @@ FIELD(ID_AA64ISAR1, FCMA, 16, 4)
 FIELD(ID_AA64ISAR1, LRCPC, 20, 4)
 FIELD(ID_AA64ISAR1, GPA, 24, 4)
 FIELD(ID_AA64ISAR1, GPI, 28, 4)
+#ifdef _MSC_VER
+#define R_ID_AA64ISAR1_FRINTTS_SHIFT    32
+#define R_ID_AA64ISAR1_FRINTTS_LENGTH   4
+#define R_ID_AA64ISAR1_FRINTTS_MASK     MAKE_64BIT_MASK(R_ID_AA64ISAR1_FRINTTS_SHIFT, R_ID_AA64ISAR1_FRINTTS_LENGTH)
+#define R_ID_AA64ISAR1_SB_SHIFT         36
+#define R_ID_AA64ISAR1_SB_LENGTH        4
+#define R_ID_AA64ISAR1_SB_MASK          MAKE_64BIT_MASK(R_ID_AA64ISAR1_SB_SHIFT, R_ID_AA64ISAR1_SB_LENGTH)
+#define R_ID_AA64ISAR1_SPECRES_SHIFT    40
+#define R_ID_AA64ISAR1_SPECRES_LENGTH   4
+#define R_ID_AA64ISAR1_SPECRES_MASK     MAKE_64BIT_MASK(R_ID_AA64ISAR1_SPECRES_SHIFT, R_ID_AA64ISAR1_SPECRES_LENGTH)
+#else
 FIELD(ID_AA64ISAR1, FRINTTS, 32, 4)
 FIELD(ID_AA64ISAR1, SB, 36, 4)
 FIELD(ID_AA64ISAR1, SPECRES, 40, 4)
+#endif
 
 FIELD(ID_AA64PFR0, EL0, 0, 4)
 FIELD(ID_AA64PFR0, EL1, 4, 4)
@@ -1797,7 +1773,13 @@ FIELD(ID_AA64PFR0, FP, 16, 4)
 FIELD(ID_AA64PFR0, ADVSIMD, 20, 4)
 FIELD(ID_AA64PFR0, GIC, 24, 4)
 FIELD(ID_AA64PFR0, RAS, 28, 4)
+#ifdef _MSC_VER
+#define R_ID_AA64PFR0_SVE_SHIFT     60
+#define R_ID_AA64PFR0_SVE_LENGTH    4
+#define R_ID_AA64PFR0_SVE_MASK      MAKE_64BIT_MASK(R_ID_AA64PFR0_SVE_SHIFT, R_ID_AA64PFR0_SVE_LENGTH)
+#else
 FIELD(ID_AA64PFR0, SVE, 32, 4)
+#endif
 
 FIELD(ID_AA64PFR1, BT, 0, 4)
 FIELD(ID_AA64PFR1, SBSS, 4, 4)
@@ -1812,10 +1794,25 @@ FIELD(ID_AA64MMFR0, BIGENDEL0, 16, 4)
 FIELD(ID_AA64MMFR0, TGRAN16, 20, 4)
 FIELD(ID_AA64MMFR0, TGRAN64, 24, 4)
 FIELD(ID_AA64MMFR0, TGRAN4, 28, 4)
+#ifdef _MSC_VER
+#define R_ID_AA64MMFR0_TGRAN16_2_SHIFT      32
+#define R_ID_AA64MMFR0_TGRAN16_2_LENGTH     4
+#define R_ID_AA64MMFR0_TGRAN16_2_MASK       MAKE_64BIT_MASK(R_ID_AA64MMFR0_TGRAN16_2_SHIFT, R_ID_AA64MMFR0_TGRAN16_2_LENGTH)
+#define R_ID_AA64MMFR0_TGRAN64_2_SHIFT      36
+#define R_ID_AA64MMFR0_TGRAN64_2_LENGTH     4
+#define R_ID_AA64MMFR0_TGRAN64_2_MASK       MAKE_64BIT_MASK(R_ID_AA64MMFR0_TGRAN64_2_SHIFT, R_ID_AA64MMFR0_TGRAN64_2_LENGTH)
+#define R_ID_AA64MMFR0_TGRAN4_2_SHIFT       40
+#define R_ID_AA64MMFR0_TGRAN4_2_LENGTH      4
+#define R_ID_AA64MMFR0_TGRAN4_2_MASK        MAKE_64BIT_MASK(R_ID_AA64MMFR0_TGRAN4_2_SHIFT, R_ID_AA64MMFR0_TGRAN4_2_LENGTH)
+#define R_ID_AA64MMFR0_EXS_SHIFT            44
+#define R_ID_AA64MMFR0_EXS_LENGTH           4
+#define R_ID_AA64MMFR0_EXS_MASK             MAKE_64BIT_MASK(R_ID_AA64MMFR0_EXS_SHIFT, R_ID_AA64MMFR0_EXS_LENGTH)
+#else
 FIELD(ID_AA64MMFR0, TGRAN16_2, 32, 4)
 FIELD(ID_AA64MMFR0, TGRAN64_2, 36, 4)
 FIELD(ID_AA64MMFR0, TGRAN4_2, 40, 4)
 FIELD(ID_AA64MMFR0, EXS, 44, 4)
+#endif
 
 FIELD(ID_AA64MMFR1, HAFDBS, 0, 4)
 FIELD(ID_AA64MMFR1, VMIDBITS, 4, 4)
@@ -1834,6 +1831,29 @@ FIELD(ID_AA64MMFR2, VARANGE, 16, 4)
 FIELD(ID_AA64MMFR2, CCIDX, 20, 4)
 FIELD(ID_AA64MMFR2, NV, 24, 4)
 FIELD(ID_AA64MMFR2, ST, 28, 4)
+#ifdef _MSC_VER
+#define R_ID_AA64MMFR2_AT_SHIFT     32
+#define R_ID_AA64MMFR2_AT_LENGTH    4
+#define R_ID_AA64MMFR2_AT_MASK      MAKE_64BIT_MASK(R_ID_AA64MMFR2_AT_SHIFT, R_ID_AA64MMFR2_AT_LENGTH)
+#define R_ID_AA64MMFR2_IDS_SHIFT    36
+#define R_ID_AA64MMFR2_IDS_LENGTH   4
+#define R_ID_AA64MMFR2_IDS_MASK     MAKE_64BIT_MASK(R_ID_AA64MMFR2_IDS_SHIFT, R_ID_AA64MMFR2_IDS_LENGTH)
+#define R_ID_AA64MMFR2_FWB_SHIFT    40
+#define R_ID_AA64MMFR2_FWB_LENGTH   4
+#define R_ID_AA64MMFR2_FWB_MASK     MAKE_64BIT_MASK(R_ID_AA64MMFR2_FWB_SHIFT, R_ID_AA64MMFR2_FWB_LENGTH)
+#define R_ID_AA64MMFR2_TTL_SHIFT    48
+#define R_ID_AA64MMFR2_TTL_LENGTH   4
+#define R_ID_AA64MMFR2_TTL_MASK     MAKE_64BIT_MASK(R_ID_AA64MMFR2_TTL_SHIFT, R_ID_AA64MMFR2_TTL_LENGTH)
+#define R_ID_AA64MMFR2_BBM_SHIFT    52
+#define R_ID_AA64MMFR2_BBM_LENGTH   4
+#define R_ID_AA64MMFR2_BBM_MASK     MAKE_64BIT_MASK(R_ID_AA64MMFR2_BBM_SHIFT, R_ID_AA64MMFR2_BBM_LENGTH)
+#define R_ID_AA64MMFR2_EVT_SHIFT    56
+#define R_ID_AA64MMFR2_EVT_LENGTH   4
+#define R_ID_AA64MMFR2_EVT_MASK     MAKE_64BIT_MASK(R_ID_AA64MMFR2_EVT_SHIFT, R_ID_AA64MMFR2_EVT_LENGTH)
+#define R_ID_AA64MMFR2_E0PD_SHIFT   60
+#define R_ID_AA64MMFR2_E0PD_LENGTH  4
+#define R_ID_AA64MMFR2_E0PD_MASK    MAKE_64BIT_MASK(R_ID_AA64MMFR2_E0PD_SHIFT, R_ID_AA64MMFR2_E0PD_LENGTH)
+#else
 FIELD(ID_AA64MMFR2, AT, 32, 4)
 FIELD(ID_AA64MMFR2, IDS, 36, 4)
 FIELD(ID_AA64MMFR2, FWB, 40, 4)
@@ -1841,6 +1861,7 @@ FIELD(ID_AA64MMFR2, TTL, 48, 4)
 FIELD(ID_AA64MMFR2, BBM, 52, 4)
 FIELD(ID_AA64MMFR2, EVT, 56, 4)
 FIELD(ID_AA64MMFR2, E0PD, 60, 4)
+#endif
 
 FIELD(ID_AA64DFR0, DEBUGVER, 0, 4)
 FIELD(ID_AA64DFR0, TRACEVER, 4, 4)
@@ -1848,9 +1869,21 @@ FIELD(ID_AA64DFR0, PMUVER, 8, 4)
 FIELD(ID_AA64DFR0, BRPS, 12, 4)
 FIELD(ID_AA64DFR0, WRPS, 20, 4)
 FIELD(ID_AA64DFR0, CTX_CMPS, 28, 4)
+#ifdef _MSC_VER
+#define R_ID_AA64DFR0_PMSVER_SHIFT      32
+#define R_ID_AA64DFR0_PMSVER_LENGTH     4
+#define R_ID_AA64DFR0_PMSVER_MASK       MAKE_64BIT_MASK(R_ID_AA64DFR0_PMSVER_SHIFT, R_ID_AA64DFR0_PMSVER_LENGTH)
+#define R_ID_AA64DFR0_DOUBLELOCK_SHIFT  36
+#define R_ID_AA64DFR0_DOUBLELOCK_LENGTH 4
+#define R_ID_AA64DFR0_DOUBLELOCK_MASK   MAKE_64BIT_MASK(R_ID_AA64DFR0_DOUBLELOCK_SHIFT, R_ID_AA64DFR0_DOUBLELOCK_LENGTH)
+#define R_ID_AA64DFR0_TRACEFILT_SHIFT   40
+#define R_ID_AA64DFR0_TRACEFILT_LENGTH  4
+#define R_ID_AA64DFR0_TRACEFILT_MASK    MAKE_64BIT_MASK(R_ID_AA64DFR0_TRACEFILT_SHIFT, R_ID_AA64DFR0_TRACEFILT_LENGTH)
+#else
 FIELD(ID_AA64DFR0, PMSVER, 32, 4)
 FIELD(ID_AA64DFR0, DOUBLELOCK, 36, 4)
 FIELD(ID_AA64DFR0, TRACEFILT, 40, 4)
+#endif
 
 FIELD(ID_DFR0, COPDBG, 0, 4)
 FIELD(ID_DFR0, COPSDBG, 4, 4)
@@ -1942,9 +1975,6 @@ static inline int arm_feature(CPUARMState *env, int feature)
     return (env->features & (1ULL << feature)) != 0;
 }
 
-void arm_cpu_finalize_features(ARMCPU *cpu, Error **errp);
-
-#if !defined(CONFIG_USER_ONLY)
 /* Return true if exception levels below EL3 are in secure state,
  * or would be following an exception return to that level.
  * Unlike arm_is_secure() (which is always a question about the
@@ -1987,18 +2017,6 @@ static inline bool arm_is_secure(CPUARMState *env)
     }
     return arm_is_secure_below_el3(env);
 }
-
-#else
-static inline bool arm_is_secure_below_el3(CPUARMState *env)
-{
-    return false;
-}
-
-static inline bool arm_is_secure(CPUARMState *env)
-{
-    return false;
-}
-#endif
 
 /**
  * arm_hcr_el2_eff(): Return the effective value of HCR_EL2.
@@ -2088,14 +2106,8 @@ uint32_t arm_phys_excp_target_el(CPUState *cs, uint32_t excp_idx,
                                  uint32_t cur_el, bool secure);
 
 /* Interface between CPU and Interrupt controller.  */
-#ifndef CONFIG_USER_ONLY
 bool armv7m_nvic_can_take_pending_exception(void *opaque);
-#else
-static inline bool armv7m_nvic_can_take_pending_exception(void *opaque)
-{
-    return true;
-}
-#endif
+
 /**
  * armv7m_nvic_set_pending: mark the specified exception as pending
  * @opaque: the NVIC
@@ -2201,14 +2213,7 @@ int armv7m_nvic_raw_execution_priority(void *opaque);
  * @secure: the security state to test
  * This corresponds to the pseudocode IsReqExecPriNeg().
  */
-#ifndef CONFIG_USER_ONLY
 bool armv7m_nvic_neg_prio_requested(void *opaque, bool secure);
-#else
-static inline bool armv7m_nvic_neg_prio_requested(void *opaque, bool secure)
-{
-    return false;
-}
-#endif
 
 /* Interface for defining coprocessor registers.
  * Registers are defined in tables of arm_cp_reginfo structs
@@ -2259,6 +2264,7 @@ static inline bool armv7m_nvic_neg_prio_requested(void *opaque, bool secure)
      ((crm) << CP_REG_ARM64_SYSREG_CRM_SHIFT) |         \
      ((op2) << CP_REG_ARM64_SYSREG_OP2_SHIFT))
 
+#if 0
 /* Convert a full 64 bit KVM register ID to the truncated 32 bit
  * version used as a key for the coprocessor register hashtable
  */
@@ -2300,6 +2306,7 @@ static inline uint64_t cpreg_to_kvm_id(uint32_t cpregid)
     }
     return kvmid;
 }
+#endif
 
 /* ARMCPRegInfo type field bits. If the SPECIAL bit is set this is a
  * special-behaviour cp reg and bits [11..8] indicate what behaviour
@@ -2426,11 +2433,7 @@ static inline bool cptype_valid(int cptype)
  * as actually being PL0_R. However some bits of any given register
  * may still be masked.
  */
-#ifdef CONFIG_USER_ONLY
-#define PL0U_R PL0_R
-#else
 #define PL0U_R PL1_R
-#endif
 
 #define PL3_RW (PL3_R | PL3_W)
 #define PL2_RW (PL2_R | PL2_W)
@@ -3095,9 +3098,8 @@ static inline bool arm_sctlr_b(CPUARMState *env)
          * let linux-user ignore the fact that it conflicts with SCTLR_B.
          * This lets people run BE32 binaries with "-cpu any".
          */
-#ifndef CONFIG_USER_ONLY
-        !arm_feature(env, ARM_FEATURE_V7) &&
-#endif
+        // Unicorn: Our hack to support BE32 mode
+        // !arm_feature(env, ARM_FEATURE_V7) &&
         (env->cp15.sctlr_el[1] & SCTLR_B) != 0;
 }
 
@@ -3106,23 +3108,6 @@ uint64_t arm_sctlr(CPUARMState *env, int el);
 static inline bool arm_cpu_data_is_big_endian_a32(CPUARMState *env,
                                                   bool sctlr_b)
 {
-#ifdef CONFIG_USER_ONLY
-    /*
-     * In system mode, BE32 is modelled in line with the
-     * architecture (as word-invariant big-endianness), where loads
-     * and stores are done little endian but from addresses which
-     * are adjusted by XORing with the appropriate constant. So the
-     * endianness to use for the raw data access is not affected by
-     * SCTLR.B.
-     * In user mode, however, we model BE32 as byte-invariant
-     * big-endianness (because user-only code cannot tell the
-     * difference), and so we need to use a data access endianness
-     * that depends on SCTLR.B.
-     */
-    if (sctlr_b) {
-        return true;
-    }
-#endif
     /* In 32bit endianness is determined by looking at CPSR's E bit */
     return env->uncached_cpsr & CPSR_E;
 }
@@ -3246,34 +3231,14 @@ static inline int cpu_mmu_index(CPUARMState *env, bool ifetch)
 
 static inline bool bswap_code(bool sctlr_b)
 {
-#ifdef CONFIG_USER_ONLY
-    /* BE8 (SCTLR.B = 0, TARGET_WORDS_BIGENDIAN = 1) is mixed endian.
-     * The invalid combination SCTLR.B=1/CPSR.E=1/TARGET_WORDS_BIGENDIAN=0
-     * would also end up as a mixed-endian mode with BE code, LE data.
-     */
-    return
-#ifdef TARGET_WORDS_BIGENDIAN
-        1 ^
-#endif
-        sctlr_b;
-#else
     /* All code access in ARM is little endian, and there are no loaders
      * doing swaps that need to be reversed
      */
-    return 0;
-#endif
+    // return 0;
+    // Unicorn: Our hack to support BE32 for system emulation, which
+    //          I believe shouldn't have existed...
+    return sctlr_b;
 }
-
-#ifdef CONFIG_USER_ONLY
-static inline bool arm_cpu_bswap_data(CPUARMState *env)
-{
-    return
-#ifdef TARGET_WORDS_BIGENDIAN
-       1 ^
-#endif
-       arm_cpu_data_is_big_endian(env);
-}
-#endif
 
 void cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
                           target_ulong *cs_base, uint32_t *flags);
@@ -3284,7 +3249,6 @@ enum {
     QEMU_PSCI_CONDUIT_HVC = 2,
 };
 
-#ifndef CONFIG_USER_ONLY
 /* Return the address space index to use for a memory access */
 static inline int arm_asidx_from_attrs(CPUState *cs, MemTxAttrs attrs)
 {
@@ -3299,32 +3263,6 @@ static inline AddressSpace *arm_addressspace(CPUState *cs, MemTxAttrs attrs)
 {
     return cpu_get_address_space(cs, arm_asidx_from_attrs(cs, attrs));
 }
-#endif
-
-/**
- * arm_register_pre_el_change_hook:
- * Register a hook function which will be called immediately before this
- * CPU changes exception level or mode. The hook function will be
- * passed a pointer to the ARMCPU and the opaque data pointer passed
- * to this function when the hook was registered.
- *
- * Note that if a pre-change hook is called, any registered post-change hooks
- * are guaranteed to subsequently be called.
- */
-void arm_register_pre_el_change_hook(ARMCPU *cpu, ARMELChangeHookFn *hook,
-                                 void *opaque);
-/**
- * arm_register_el_change_hook:
- * Register a hook function which will be called immediately after this
- * CPU changes exception level or mode. The hook function will be
- * passed a pointer to the ARMCPU and the opaque data pointer passed
- * to this function when the hook was registered.
- *
- * Note that any registered hooks registered here are guaranteed to be called
- * if pre-change hooks have been.
- */
-void arm_register_el_change_hook(ARMCPU *cpu, ARMELChangeHookFn *hook, void
-        *opaque);
 
 /**
  * arm_rebuild_hflags:
@@ -3696,17 +3634,20 @@ static inline bool isar_feature_aa64_fcma(const ARMISARegisters *id)
 
 static inline bool isar_feature_aa64_pauth(const ARMISARegisters *id)
 {
+    uint64_t apa, api, gpa, gpi;
+
     /*
      * Note that while QEMU will only implement the architected algorithm
      * QARMA, and thus APA+GPA, the host cpu for kvm may use implementation
      * defined algorithms, and thus API+GPI, and this predicate controls
      * migration of the 128-bit keys.
      */
-    return (id->id_aa64isar1 &
-            (FIELD_DP64(0, ID_AA64ISAR1, APA, 0xf) |
-             FIELD_DP64(0, ID_AA64ISAR1, API, 0xf) |
-             FIELD_DP64(0, ID_AA64ISAR1, GPA, 0xf) |
-             FIELD_DP64(0, ID_AA64ISAR1, GPI, 0xf))) != 0;
+    FIELD_DP64(0, ID_AA64ISAR1, APA, 0xf, apa)
+    FIELD_DP64(0, ID_AA64ISAR1, API, 0xf, api)
+    FIELD_DP64(0, ID_AA64ISAR1, GPA, 0xf, gpa)
+    FIELD_DP64(0, ID_AA64ISAR1, GPI, 0xf, gpi)
+
+    return (id->id_aa64isar1 & (apa | api | gpa | gpi)) != 0;
 }
 
 static inline bool isar_feature_aa64_sb(const ARMISARegisters *id)
@@ -3844,7 +3785,6 @@ static inline bool isar_feature_any_ccidx(const ARMISARegisters *id)
 /*
  * Forward to the above feature tests given an ARMCPU pointer.
  */
-#define cpu_isar_feature(name, cpu) \
-    ({ ARMCPU *cpu_ = (cpu); isar_feature_##name(&cpu_->isar); })
+#define cpu_isar_feature(name, cpu) isar_feature_##name(&cpu->isar)
 
 #endif

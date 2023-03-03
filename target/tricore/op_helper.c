@@ -20,7 +20,7 @@
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
-#include <zlib.h> /* for crc32 */
+#include "qemu/crc32c.h"
 
 
 /* Exception helpers */
@@ -105,13 +105,6 @@ static void raise_exception_sync_helper(CPUTriCoreState *env, uint32_t class,
                                         uint32_t tin, uintptr_t pc)
 {
     raise_exception_sync_internal(env, class, tin, pc, 0);
-}
-
-void helper_qemu_excp(CPUTriCoreState *env, uint32_t excp)
-{
-    CPUState *cs = env_cpu(env);
-    cs->exception_index = excp;
-    cpu_loop_exit(cs);
 }
 
 /* Addressing mode helper */
@@ -2799,4 +2792,13 @@ void helper_psw_write(CPUTriCoreState *env, uint32_t arg)
 uint32_t helper_psw_read(CPUTriCoreState *env)
 {
     return psw_read(env);
+}
+
+void helper_uc_tricore_exit(CPUTriCoreState *env)
+{
+    CPUState *cs = env_cpu(env);
+
+    cs->exception_index = EXCP_HLT;
+    cs->halted = 1;
+    cpu_loop_exit(cs);
 }

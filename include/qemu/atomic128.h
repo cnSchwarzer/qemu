@@ -13,7 +13,7 @@
 #ifndef QEMU_ATOMIC128_H
 #define QEMU_ATOMIC128_H
 
-#include "qemu/int128.h"
+#include "int128.h"
 
 /*
  * GCC is a house divided about supporting large atomic operations.
@@ -50,7 +50,18 @@ static inline Int128 atomic16_cmpxchg(Int128 *ptr, Int128 cmp, Int128 new)
 #elif defined(CONFIG_CMPXCHG128)
 static inline Int128 atomic16_cmpxchg(Int128 *ptr, Int128 cmp, Int128 new)
 {
+#ifdef _MSC_VER
+    /* compare and swap. the same as __sync_val_compare_and_swap().
+        if the current value of *ptr is cmp, then write new into *ptr,
+        return *ptr old value. */
+    Int128 save = *ptr;
+    if (!memcmp(ptr, &cmp, sizeof(cmp))) {
+        *ptr = new;
+    }
+    return save;
+#else
     return __sync_val_compare_and_swap_16(ptr, cmp, new);
+#endif
 }
 # define HAVE_CMPXCHG128 1
 #elif defined(__aarch64__)
@@ -85,7 +96,6 @@ Int128 QEMU_ERROR("unsupported atomic")
 # define HAVE_CMPXCHG128 0
 #endif /* Some definition for HAVE_CMPXCHG128 */
 
-
 #if defined(CONFIG_ATOMIC128)
 static inline Int128 atomic16_read(Int128 *ptr)
 {
@@ -98,7 +108,7 @@ static inline void atomic16_set(Int128 *ptr, Int128 val)
 }
 
 # define HAVE_ATOMIC128 1
-#elif !defined(CONFIG_USER_ONLY) && defined(__aarch64__)
+#elif defined(__aarch64__)
 /* We can do better than cmpxchg for AArch64.  */
 static inline Int128 atomic16_read(Int128 *ptr)
 {
@@ -128,11 +138,17 @@ static inline void atomic16_set(Int128 *ptr, Int128 val)
 }
 
 # define HAVE_ATOMIC128 1
-#elif !defined(CONFIG_USER_ONLY) && HAVE_CMPXCHG128
+#elif HAVE_CMPXCHG128
 static inline Int128 atomic16_read(Int128 *ptr)
 {
     /* Maybe replace 0 with 0, returning the old value.  */
+#ifdef _MSC_VER
+    Int128 x = int128_make64(0);
+    Int128 y = int128_make64(0);
+    return atomic16_cmpxchg(ptr, x, y);
+#else
     return atomic16_cmpxchg(ptr, 0, 0);
+#endif
 }
 
 static inline void atomic16_set(Int128 *ptr, Int128 val)
@@ -141,7 +157,11 @@ static inline void atomic16_set(Int128 *ptr, Int128 val)
     do {
         cmp = old;
         old = atomic16_cmpxchg(ptr, cmp, val);
+#ifdef _MSC_VER
+    } while (memcmp(&old, &cmp, sizeof(old)));
+#else
     } while (old != cmp);
+#endif
 }
 
 # define HAVE_ATOMIC128 1

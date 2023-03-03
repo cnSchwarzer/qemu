@@ -13,18 +13,6 @@
 #define QEMU_GUEST_RANDOM_H
 
 /**
- * qemu_guest_random_seed_main(const char *optarg, Error **errp)
- * @optarg: a non-NULL pointer to a C string
- * @errp: an error indicator
- *
- * The @optarg value is that which accompanies the -seed argument.
- * This forces qemu_guest_getrandom into deterministic mode.
- *
- * Returns 0 on success, < 0 on failure while setting *errp.
- */
-int qemu_guest_random_seed_main(const char *optarg, Error **errp);
-
-/**
  * qemu_guest_random_seed_thread_part1(void)
  *
  * If qemu_getrandom is in deterministic mode, returns an
@@ -53,7 +41,7 @@ void qemu_guest_random_seed_thread_part2(uint64_t seed);
  *
  * Returns 0 on success, < 0 on failure while setting *errp.
  */
-int qemu_guest_getrandom(void *buf, size_t len, Error **errp);
+int qemu_guest_getrandom(void *buf, size_t len);
 
 /**
  * qemu_guest_getrandom_nofail(void *buf, size_t len)

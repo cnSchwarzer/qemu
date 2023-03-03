@@ -29,18 +29,16 @@
 #include "qemu/atomic128.h"
 #include "tcg/tcg.h"
 
-#if !defined(CONFIG_USER_ONLY)
 #include "hw/s390x/storage-keys.h"
-#endif
 
 /*****************************************************************************/
 /* Softmmu support */
 
 /* #define DEBUG_HELPER */
 #ifdef DEBUG_HELPER
-#define HELPER_LOG(x...) qemu_log(x)
+#define HELPER_LOG(x, ...) qemu_log(x)
 #else
-#define HELPER_LOG(x...)
+#define HELPER_LOG(x, ...)
 #endif
 
 static inline bool psw_key_valid(CPUS390XState *env, uint8_t psw_key)
@@ -158,10 +156,6 @@ static void do_access_memset(CPUS390XState *env, vaddr vaddr, char *haddr,
                              uint8_t byte, uint16_t size, int mmu_idx,
                              uintptr_t ra)
 {
-#ifdef CONFIG_USER_ONLY
-    g_assert(haddr);
-    memset(haddr, byte, size);
-#else
     TCGMemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
     int i;
 
@@ -183,7 +177,6 @@ static void do_access_memset(CPUS390XState *env, vaddr vaddr, char *haddr,
             }
         }
     }
-#endif
 }
 
 static void access_memset(CPUS390XState *env, S390Access *desta,
@@ -202,9 +195,6 @@ static void access_memset(CPUS390XState *env, S390Access *desta,
 static uint8_t do_access_get_byte(CPUS390XState *env, vaddr vaddr, char **haddr,
                                   int offset, int mmu_idx, uintptr_t ra)
 {
-#ifdef CONFIG_USER_ONLY
-    return ldub_p(*haddr + offset);
-#else
     TCGMemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
     uint8_t byte;
 
@@ -218,7 +208,6 @@ static uint8_t do_access_get_byte(CPUS390XState *env, vaddr vaddr, char **haddr,
     byte = helper_ret_ldub_mmu(env, vaddr + offset, oi, ra);
     *haddr = tlb_vaddr_to_host(env, vaddr, MMU_DATA_LOAD, mmu_idx);
     return byte;
-#endif
 }
 
 static uint8_t access_get_byte(CPUS390XState *env, S390Access *access,
@@ -236,9 +225,6 @@ static void do_access_set_byte(CPUS390XState *env, vaddr vaddr, char **haddr,
                                int offset, uint8_t byte, int mmu_idx,
                                uintptr_t ra)
 {
-#ifdef CONFIG_USER_ONLY
-    stb_p(*haddr + offset, byte);
-#else
     TCGMemOpIdx oi = make_memop_idx(MO_UB, mmu_idx);
 
     if (likely(*haddr)) {
@@ -251,7 +237,6 @@ static void do_access_set_byte(CPUS390XState *env, vaddr vaddr, char **haddr,
      */
     helper_ret_stb_mmu(env, vaddr + offset, byte, oi, ra);
     *haddr = tlb_vaddr_to_host(env, vaddr, MMU_DATA_STORE, mmu_idx);
-#endif
 }
 
 static void access_set_byte(CPUS390XState *env, S390Access *access,
@@ -1440,7 +1425,9 @@ static inline uint32_t do_unpkau(CPUS390XState *env, uint64_t dest,
     switch (b & 0xf) {
     case 0xa:
     case 0xc:
-    case 0xe ... 0xf:
+    // case 0xe ... 0xf:
+    case 0xe:
+    case 0xf:
         cc = 0;  /* plus */
         break;
     case 0xb:
@@ -1448,7 +1435,17 @@ static inline uint32_t do_unpkau(CPUS390XState *env, uint64_t dest,
         cc = 1;  /* minus */
         break;
     default:
-    case 0x0 ... 0x9:
+    // case 0x0 ... 0x9:
+    case 0x0:
+    case 0x1:
+    case 0x2:
+    case 0x3:
+    case 0x4:
+    case 0x5:
+    case 0x6:
+    case 0x7:
+    case 0x8:
+    case 0x9:
         cc = 3;  /* invalid */
         break;
     }
@@ -1629,7 +1626,7 @@ uint32_t HELPER(trXX)(CPUS390XState *env, uint32_t r1, uint32_t r2,
     /* The lower address bits of TBL are ignored.  For TROO, TROT, it's
        the low 3 bits (double-word aligned).  For TRTO, TRTT, it's either
        the low 12 bits (4K, without ETF2-ENH) or 3 bits (with ETF2-ENH).  */
-    if (ssize == 2 && !s390_has_feat(S390_FEAT_ETF2_ENH)) {
+    if (ssize == 2 && !s390_has_feat(env->uc, S390_FEAT_ETF2_ENH)) {
         tbl &= -4096;
     } else {
         tbl &= -8;
@@ -1731,7 +1728,7 @@ static uint32_t do_csst(CPUS390XState *env, uint32_t r3, uint64_t a1,
 
     /* Sanity check the function code and storage characteristic.  */
     if (fc > 1 || sc > 3) {
-        if (!s390_has_feat(S390_FEAT_COMPARE_AND_SWAP_AND_STORE_2)) {
+        if (!s390_has_feat(env->uc, S390_FEAT_COMPARE_AND_SWAP_AND_STORE_2)) {
             goto spec_exception;
         }
         if (fc > 2 || sc > 4 || (fc == 2 && (r3 & 1))) {
@@ -1778,13 +1775,8 @@ static uint32_t do_csst(CPUS390XState *env, uint32_t r3, uint64_t a1,
             uint32_t ov;
 
             if (parallel) {
-#ifdef CONFIG_USER_ONLY
-                uint32_t *haddr = g2h(a1);
-                ov = atomic_cmpxchg__nocheck(haddr, cv, nv);
-#else
                 TCGMemOpIdx oi = make_memop_idx(MO_TEUL | MO_ALIGN, mem_idx);
                 ov = helper_atomic_cmpxchgl_be_mmu(env, a1, cv, nv, oi, ra);
-#endif
             } else {
                 ov = cpu_ldl_data_ra(env, a1, ra);
                 cpu_stl_data_ra(env, a1, (ov == cv ? nv : ov), ra);
@@ -1802,13 +1794,8 @@ static uint32_t do_csst(CPUS390XState *env, uint32_t r3, uint64_t a1,
 
             if (parallel) {
 #ifdef CONFIG_ATOMIC64
-# ifdef CONFIG_USER_ONLY
-                uint64_t *haddr = g2h(a1);
-                ov = atomic_cmpxchg__nocheck(haddr, cv, nv);
-# else
                 TCGMemOpIdx oi = make_memop_idx(MO_TEQ | MO_ALIGN, mem_idx);
                 ov = helper_atomic_cmpxchgq_be_mmu(env, a1, cv, nv, oi, ra);
-# endif
 #else
                 /* Note that we asserted !parallel above.  */
                 g_assert_not_reached();
@@ -1912,7 +1899,6 @@ uint32_t HELPER(csst_parallel)(CPUS390XState *env, uint32_t r3, uint64_t a1,
     return do_csst(env, r3, a1, a2, true);
 }
 
-#if !defined(CONFIG_USER_ONLY)
 void HELPER(lctlg)(CPUS390XState *env, uint32_t r1, uint64_t a2, uint32_t r3)
 {
     uintptr_t ra = GETPC();
@@ -2075,19 +2061,16 @@ uint32_t HELPER(tprot)(CPUS390XState *env, uint64_t a1, uint64_t a2)
 /* insert storage key extended */
 uint64_t HELPER(iske)(CPUS390XState *env, uint64_t r2)
 {
-    static S390SKeysState *ss;
-    static S390SKeysClass *skeyclass;
+    S390SKeysState *ss = (S390SKeysState *)(&((S390CPU *)env->uc->cpu)->ss);
+    S390SKeysClass *skeyclass = S390_SKEYS_GET_CLASS(ss);
     uint64_t addr = wrap_address(env, r2);
     uint8_t key;
 
+#if 0
     if (addr > ram_size) {
         return 0;
     }
-
-    if (unlikely(!ss)) {
-        ss = s390_get_skeys_device();
-        skeyclass = S390_SKEYS_GET_CLASS(ss);
-    }
+#endif
 
     if (skeyclass->get_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key)) {
         return 0;
@@ -2098,19 +2081,16 @@ uint64_t HELPER(iske)(CPUS390XState *env, uint64_t r2)
 /* set storage key extended */
 void HELPER(sske)(CPUS390XState *env, uint64_t r1, uint64_t r2)
 {
-    static S390SKeysState *ss;
-    static S390SKeysClass *skeyclass;
+    S390SKeysState *ss = (S390SKeysState *)(&((S390CPU *)env->uc->cpu)->ss);
+    S390SKeysClass *skeyclass = S390_SKEYS_GET_CLASS(ss);
     uint64_t addr = wrap_address(env, r2);
     uint8_t key;
 
+#if 0
     if (addr > ram_size) {
         return;
     }
-
-    if (unlikely(!ss)) {
-        ss = s390_get_skeys_device();
-        skeyclass = S390_SKEYS_GET_CLASS(ss);
-    }
+#endif
 
     key = (uint8_t) r1;
     skeyclass->set_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
@@ -2124,18 +2104,15 @@ void HELPER(sske)(CPUS390XState *env, uint64_t r1, uint64_t r2)
 /* reset reference bit extended */
 uint32_t HELPER(rrbe)(CPUS390XState *env, uint64_t r2)
 {
-    static S390SKeysState *ss;
-    static S390SKeysClass *skeyclass;
+    S390SKeysState *ss = (S390SKeysState *)(&((S390CPU *)env->uc->cpu)->ss);
+    S390SKeysClass *skeyclass = S390_SKEYS_GET_CLASS(ss);
     uint8_t re, key;
 
+#if 0
     if (r2 > ram_size) {
         return 0;
     }
-
-    if (unlikely(!ss)) {
-        ss = s390_get_skeys_device();
-        skeyclass = S390_SKEYS_GET_CLASS(ss);
-    }
+#endif
 
     if (skeyclass->get_skeys(ss, r2 / TARGET_PAGE_SIZE, 1, &key)) {
         return 0;
@@ -2354,7 +2331,6 @@ uint64_t HELPER(lra)(CPUS390XState *env, uint64_t addr)
     env->cc_op = cc;
     return ret;
 }
-#endif
 
 /* load pair from quadword */
 uint64_t HELPER(lpq)(CPUS390XState *env, uint64_t addr)

@@ -17,6 +17,11 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+   Modified for Unicorn Engine by Eric Poole <eric.poole@aptiv.com>, 2022
+   Copyright 2022 Aptiv 
+*/
+
 #ifndef TRICORE_CPU_H
 #define TRICORE_CPU_H
 
@@ -28,8 +33,8 @@ struct tricore_boot_info;
 
 typedef struct tricore_def_t tricore_def_t;
 
-typedef struct CPUTriCoreState CPUTriCoreState;
-struct CPUTriCoreState {
+// struct CPUTriCoreState {
+typedef struct CPUTriCoreState {
     /* GPR Register */
     uint32_t gpr_a[16];
     uint32_t gpr_d[16];
@@ -183,13 +188,19 @@ struct CPUTriCoreState {
     int error_code;
     uint32_t hflags;    /* CPU State */
 
-    /* Internal CPU feature flags.  */
-    uint64_t features;
-
     const tricore_def_t *cpu_model;
     void *irq[8];
     struct QEMUTimer *timer; /* Internal timer */
-};
+
+    /* Fields up to this point are cleared by a CPU reset */
+    int end_reset_fields;
+
+    /* Fields from here on are preserved across CPU reset. */
+    uint32_t features;
+
+    // Unicorn engine
+    struct uc_struct *uc;
+} CPUTriCoreState;
 
 /**
  * TriCoreCPU:
@@ -197,15 +208,17 @@ struct CPUTriCoreState {
  *
  * A TriCore CPU.
  */
-struct TriCoreCPU {
+// TODO: Why is the type def needed? Without it the later typedef fails to find this... ?
+typedef struct TriCoreCPU {
     /*< private >*/
     CPUState parent_obj;
     /*< public >*/
 
     CPUNegativeOffsetState neg;
     CPUTriCoreState env;
-};
 
+    struct TriCoreCPUClass cc;
+} TriCoreCPU;
 
 hwaddr tricore_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
 void tricore_cpu_dump_state(CPUState *cpu, FILE *f, int flags);
@@ -353,6 +366,8 @@ enum {
 
 uint32_t psw_read(CPUTriCoreState *env);
 void psw_write(CPUTriCoreState *env, uint32_t val);
+int tricore_cpu_gdb_read_register(CPUState *cs, GByteArray *mem_buf, int n);
+int tricore_cpu_gdb_write_register(CPUState *cs, uint8_t *mem_buf, int n);
 
 void fpu_set_state(CPUTriCoreState *env);
 
@@ -360,7 +375,6 @@ void fpu_set_state(CPUTriCoreState *env);
 
 void tricore_cpu_list(void);
 
-#define cpu_signal_handler cpu_tricore_signal_handler
 #define cpu_list tricore_cpu_list
 
 static inline int cpu_mmu_index(CPUTriCoreState *env, bool ifetch)
@@ -373,21 +387,8 @@ typedef TriCoreCPU ArchCPU;
 
 #include "exec/cpu-all.h"
 
-enum {
-    /* 1 bit to define user level / supervisor access */
-    ACCESS_USER  = 0x00,
-    ACCESS_SUPER = 0x01,
-    /* 1 bit to indicate direction */
-    ACCESS_STORE = 0x02,
-    /* Type of instruction that generated the access */
-    ACCESS_CODE  = 0x10, /* Code fetch access                */
-    ACCESS_INT   = 0x20, /* Integer load/store access        */
-    ACCESS_FLOAT = 0x30, /* floating point load/store access */
-};
-
 void cpu_state_reset(CPUTriCoreState *s);
-void tricore_tcg_init(void);
-int cpu_tricore_signal_handler(int host_signum, void *pinfo, void *puc);
+void tricore_tcg_init(struct uc_struct *uc);
 
 static inline void cpu_get_tb_cpu_state(CPUTriCoreState *env, target_ulong *pc,
                                         target_ulong *cs_base, uint32_t *flags)

@@ -36,6 +36,9 @@
 
 #include "qemu/compiler.h"
 
+struct uc_struct;
+
+
 /* Older versions of C++ don't get definitions of various macros from
  * stdlib.h unless we define these macros before first inclusion of
  * that system header.
@@ -48,16 +51,6 @@
 #endif
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
-#endif
-
-/* The following block of code temporarily renames the daemon() function so the
- * compiler does not see the warning associated with it in stdlib.h on OSX
- */
-#ifdef __APPLE__
-#define daemon qemu_fake_daemon_function
-#include <stdlib.h>
-#undef daemon
-extern int daemon(int, int);
 #endif
 
 #ifdef _WIN32
@@ -73,7 +66,9 @@ extern int daemon(int, int);
 
 /* enable C99/POSIX format strings (needs mingw32-runtime 3.15 or later) */
 #ifdef __MINGW32__
+#ifndef __USE_MINGW_ANSI_STDIO
 #define __USE_MINGW_ANSI_STDIO 1
+#endif // __USE_MINGW_ANSI_STDIO
 #endif
 
 #include <stdarg.h>
@@ -85,19 +80,16 @@ extern int daemon(int, int);
 #include <stdio.h>
 
 #include <string.h>
-#include <strings.h>
 #include <inttypes.h>
 #include <limits.h>
-/* Put unistd.h before time.h as that triggers localtime_r/gmtime_r
- * function availability on recentish Mingw-w64 platforms. */
-#include <unistd.h>
+
+#include <unicorn/platform.h>
+
 #include <time.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <assert.h>
 /* setjmp must be declared before sysemu/os-win32.h
  * because it is redefined there. */
@@ -120,11 +112,35 @@ extern int daemon(int, int);
 #endif
 
 #ifdef CONFIG_POSIX
-#include "sysemu/os-posix.h"
+#include "sys/mman.h"
 #endif
 
-#include "glib-compat.h"
+/*
+ * Only allow MAP_JIT for Mojave or later.
+ * 
+ * Source: https://github.com/moby/hyperkit/pull/259/files#diff-e6b5417230ff2daff9155d9b15aefae12e89410ec2dca1f59d04be511f6737fcR41
+ * 
+ * But using MAP_JIT causes performance regression for fork() so we only use MAP_JIT on Apple M1.
+ * 
+ * Issue: https://github.com/desktop/desktop/issues/12978
+ */
+#if defined(__APPLE__) && defined(HAVE_PTHREAD_JIT_PROTECT) && (defined(__arm__) || defined(__aarch64__))
+#define USE_MAP_JIT
+#endif
+
+#include <glib_compat.h>
 #include "qemu/typedefs.h"
+
+
+/* Starting on QEMU 2.5, qemu_hw_version() returns "2.5+" by default
+ * instead of QEMU_VERSION, so setting hw_version on MachineClass
+ * is no longer mandatory.
+ *
+ * Do NOT change this string, or it will break compatibility on all
+ * machine classes that don't set hw_version.
+ */
+#define QEMU_HW_VERSION "2.5+"
+
 
 /*
  * For mingw, as of v6.0.0, the function implementing the assert macro is
@@ -133,7 +149,8 @@ extern int daemon(int, int);
  * code that is unreachable when features are disabled.
  * All supported versions of Glib's g_assert() satisfy this requirement.
  */
-#ifdef __MINGW32__
+// Unfortunately, NDK also has this problem.
+#if defined(__MINGW32__ ) || defined(__ANDROID__) || defined(__i386__)
 #undef assert
 #define assert(x)  g_assert(x)
 #endif
@@ -157,9 +174,6 @@ extern int daemon(int, int);
  * submit patches to remove any side-effects inside an assertion, or
  * fixing error handling that should use Error instead of assert.
  */
-#ifdef NDEBUG
-#error building with NDEBUG is not supported
-#endif
 #ifdef G_DISABLE_ASSERT
 #error building with G_DISABLE_ASSERT is not supported
 #endif
@@ -261,12 +275,18 @@ extern int daemon(int, int);
 #define QEMU_IS_ALIGNED(n, m) (((n) % (m)) == 0)
 
 /* n-byte align pointer down */
-#define QEMU_ALIGN_PTR_DOWN(p, n) \
-    ((typeof(p))QEMU_ALIGN_DOWN((uintptr_t)(p), (n)))
+#ifdef _MSC_VER
+#define QEMU_ALIGN_PTR_DOWN(p, n) (QEMU_ALIGN_DOWN((uintptr_t)(p), (n)))
+#else
+#define QEMU_ALIGN_PTR_DOWN(p, n) ((typeof(p))QEMU_ALIGN_DOWN((uintptr_t)(p), (n)))
+#endif
 
 /* n-byte align pointer up */
-#define QEMU_ALIGN_PTR_UP(p, n) \
-    ((typeof(p))QEMU_ALIGN_UP((uintptr_t)(p), (n)))
+#ifndef _MSC_VER
+#define QEMU_ALIGN_PTR_UP(p, n) ((typeof(p))QEMU_ALIGN_UP((uintptr_t)(p), (n)))
+#else
+#define QEMU_ALIGN_PTR_UP(p, n) QEMU_ALIGN_UP((uintptr_t)(p), (n))
+#endif
 
 /* Check if pointer p is n-bytes aligned */
 #define QEMU_PTR_IS_ALIGNED(p, n) QEMU_IS_ALIGNED((uintptr_t)(p), (n))
@@ -275,7 +295,11 @@ extern int daemon(int, int);
  * QEMU_ALIGN_UP for a safer but slower version on arbitrary
  * numbers); works even if d is a smaller type than n.  */
 #ifndef ROUND_UP
+#ifdef _MSC_VER
+#define ROUND_UP(n, d) (((n) + (d) - 1) & (0 - (0 ? (n) : (d))))
+#else
 #define ROUND_UP(n, d) (((n) + (d) - 1) & -(0 ? (n) : (d)))
+#endif
 #endif
 
 #ifndef DIV_ROUND_UP
@@ -289,16 +313,19 @@ extern int daemon(int, int);
 #define QEMU_IS_ARRAY(x) (!__builtin_types_compatible_p(typeof(x), \
                                                         typeof(&(x)[0])))
 #ifndef ARRAY_SIZE
+#ifndef _MSC_VER
 #define ARRAY_SIZE(x) ((sizeof(x) / sizeof((x)[0])) + \
                        QEMU_BUILD_BUG_ON_ZERO(!QEMU_IS_ARRAY(x)))
+#else
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
+#endif
 #endif
 
-int qemu_daemon(int nochdir, int noclose);
 void *qemu_try_memalign(size_t alignment, size_t size);
 void *qemu_memalign(size_t alignment, size_t size);
-void *qemu_anon_ram_alloc(size_t size, uint64_t *align, bool shared);
+void *qemu_anon_ram_alloc(struct uc_struct *uc, size_t size, uint64_t *align);
 void qemu_vfree(void *ptr);
-void qemu_anon_ram_free(void *ptr, size_t size);
+void qemu_anon_ram_free(struct uc_struct *uc, void *ptr, size_t size);
 
 #define QEMU_MADV_INVALID -1
 
@@ -409,9 +436,9 @@ void qemu_anon_ram_free(void *ptr, size_t size);
 #  define QEMU_VMALLOC_ALIGN (256 * 4096)
 #elif defined(__linux__) && defined(__sparc__)
 #include <sys/shm.h>
-#  define QEMU_VMALLOC_ALIGN MAX(qemu_real_host_page_size, SHMLBA)
+#  define QEMU_VMALLOC_ALIGN MAX(uc->qemu_real_host_page_size, SHMLBA)
 #else
-#  define QEMU_VMALLOC_ALIGN qemu_real_host_page_size
+#  define QEMU_VMALLOC_ALIGN uc->qemu_real_host_page_size
 #endif
 
 #ifdef CONFIG_POSIX
@@ -437,25 +464,11 @@ struct qemu_signalfd_siginfo {
                              additional fields in the future) */
 };
 
-int qemu_signalfd(const sigset_t *mask);
-void sigaction_invoke(struct sigaction *action,
-                      struct qemu_signalfd_siginfo *info);
 #endif
 
 int qemu_madvise(void *addr, size_t len, int advice);
 int qemu_mprotect_rwx(void *addr, size_t size);
 int qemu_mprotect_none(void *addr, size_t size);
-
-int qemu_open(const char *name, int flags, ...);
-int qemu_close(int fd);
-int qemu_unlink(const char *name);
-#ifndef _WIN32
-int qemu_dup(int fd);
-#endif
-int qemu_lock_fd(int fd, int64_t start, int64_t len, bool exclusive);
-int qemu_unlock_fd(int fd, int64_t start, int64_t len);
-int qemu_lock_fd_test(int fd, int64_t start, int64_t len, bool exclusive);
-bool qemu_has_ofd_lock(void);
 
 #if defined(__HAIKU__) && defined(__i386__)
 #define FMT_pid "%ld"
@@ -465,25 +478,7 @@ bool qemu_has_ofd_lock(void);
 #define FMT_pid "%d"
 #endif
 
-bool qemu_write_pidfile(const char *pidfile, Error **errp);
-
 int qemu_get_thread_id(void);
-
-#ifndef CONFIG_IOVEC
-struct iovec {
-    void *iov_base;
-    size_t iov_len;
-};
-/*
- * Use the same value as Linux for now.
- */
-#define IOV_MAX 1024
-
-ssize_t readv(int fd, const struct iovec *iov, int iov_cnt);
-ssize_t writev(int fd, const struct iovec *iov, int iov_cnt);
-#else
-#include <sys/uio.h>
-#endif
 
 #ifdef _WIN32
 static inline void qemu_timersub(const struct timeval *val1,
@@ -502,47 +497,6 @@ static inline void qemu_timersub(const struct timeval *val1,
 #define qemu_timersub timersub
 #endif
 
-void qemu_set_cloexec(int fd);
-
-/* Starting on QEMU 2.5, qemu_hw_version() returns "2.5+" by default
- * instead of QEMU_VERSION, so setting hw_version on MachineClass
- * is no longer mandatory.
- *
- * Do NOT change this string, or it will break compatibility on all
- * machine classes that don't set hw_version.
- */
-#define QEMU_HW_VERSION "2.5+"
-
-/* QEMU "hardware version" setting. Used to replace code that exposed
- * QEMU_VERSION to guests in the past and need to keep compatibility.
- * Do not use qemu_hw_version() in new code.
- */
-void qemu_set_hw_version(const char *);
-const char *qemu_hw_version(void);
-
-void fips_set_state(bool requested);
-bool fips_get_state(void);
-
-/* Return a dynamically allocated pathname denoting a file or directory that is
- * appropriate for storing local state.
- *
- * @relative_pathname need not start with a directory separator; one will be
- * added automatically.
- *
- * The caller is responsible for releasing the value returned with g_free()
- * after use.
- */
-char *qemu_get_local_state_pathname(const char *relative_pathname);
-
-/* Find program directory, and save it for later usage with
- * qemu_get_exec_dir().
- * Try OS specific API first, if not working, parse from argv0. */
-void qemu_init_exec_dir(const char *argv0);
-
-/* Get the saved exec dir.
- * Caller needs to release the returned string by g_free() */
-char *qemu_get_exec_dir(void);
-
 /**
  * qemu_getauxval:
  * @type: the auxiliary vector key to lookup
@@ -551,70 +505,5 @@ char *qemu_get_exec_dir(void);
  * or 0 if @type is not present.
  */
 unsigned long qemu_getauxval(unsigned long type);
-
-void qemu_set_tty_echo(int fd, bool echo);
-
-void os_mem_prealloc(int fd, char *area, size_t sz, int smp_cpus,
-                     Error **errp);
-
-/**
- * qemu_get_pid_name:
- * @pid: pid of a process
- *
- * For given @pid fetch its name. Caller is responsible for
- * freeing the string when no longer needed.
- * Returns allocated string on success, NULL on failure.
- */
-char *qemu_get_pid_name(pid_t pid);
-
-/**
- * qemu_fork:
- *
- * A version of fork that avoids signal handler race
- * conditions that can lead to child process getting
- * signals that are otherwise only expected by the
- * parent. It also resets all signal handlers to the
- * default settings.
- *
- * Returns 0 to child process, pid number to parent
- * or -1 on failure.
- */
-pid_t qemu_fork(Error **errp);
-
-/* Using intptr_t ensures that qemu_*_page_mask is sign-extended even
- * when intptr_t is 32-bit and we are aligning a long long.
- */
-extern uintptr_t qemu_real_host_page_size;
-extern intptr_t qemu_real_host_page_mask;
-
-extern int qemu_icache_linesize;
-extern int qemu_icache_linesize_log;
-extern int qemu_dcache_linesize;
-extern int qemu_dcache_linesize_log;
-
-/*
- * After using getopt or getopt_long, if you need to parse another set
- * of options, then you must reset optind.  Unfortunately the way to
- * do this varies between implementations of getopt.
- */
-static inline void qemu_reset_optind(void)
-{
-#ifdef HAVE_OPTRESET
-    optind = 1;
-    optreset = 1;
-#else
-    optind = 0;
-#endif
-}
-
-/**
- * qemu_get_host_name:
- * @errp: Error object
- *
- * Operating system agnostic way of querying host name.
- *
- * Returns allocated hostname (caller should free), NULL on failure.
- */
-char *qemu_get_host_name(Error **errp);
 
 #endif

@@ -24,7 +24,7 @@
 #include "exec/cpu-defs.h"
 #include "fpu/softfloat-types.h"
 
-#define TCG_GUEST_DEFAULT_MO 0
+typedef struct TCGContext TCGContext;
 
 #define TYPE_RISCV_CPU "riscv-cpu"
 
@@ -39,13 +39,6 @@
 #define TYPE_RISCV_CPU_SIFIVE_E51       RISCV_CPU_TYPE_NAME("sifive-e51")
 #define TYPE_RISCV_CPU_SIFIVE_U34       RISCV_CPU_TYPE_NAME("sifive-u34")
 #define TYPE_RISCV_CPU_SIFIVE_U54       RISCV_CPU_TYPE_NAME("sifive-u54")
-/* Deprecated */
-#define TYPE_RISCV_CPU_RV32IMACU_NOMMU  RISCV_CPU_TYPE_NAME("rv32imacu-nommu")
-#define TYPE_RISCV_CPU_RV32GCSU_V1_09_1 RISCV_CPU_TYPE_NAME("rv32gcsu-v1.9.1")
-#define TYPE_RISCV_CPU_RV32GCSU_V1_10_0 RISCV_CPU_TYPE_NAME("rv32gcsu-v1.10.0")
-#define TYPE_RISCV_CPU_RV64IMACU_NOMMU  RISCV_CPU_TYPE_NAME("rv64imacu-nommu")
-#define TYPE_RISCV_CPU_RV64GCSU_V1_09_1 RISCV_CPU_TYPE_NAME("rv64gcsu-v1.9.1")
-#define TYPE_RISCV_CPU_RV64GCSU_V1_10_0 RISCV_CPU_TYPE_NAME("rv64gcsu-v1.10.0")
 
 #define RV32 ((target_ulong)1 << (TARGET_LONG_BITS - 2))
 #define RV64 ((target_ulong)2 << (TARGET_LONG_BITS - 2))
@@ -112,11 +105,6 @@ struct CPURISCVState {
 
     uint32_t features;
 
-#ifdef CONFIG_USER_ONLY
-    uint32_t elf_flags;
-#endif
-
-#ifndef CONFIG_USER_ONLY
     target_ulong priv;
     /* This contains QEMU specific information about the virt state. */
     target_ulong virt;
@@ -207,20 +195,15 @@ struct CPURISCVState {
 
     /* True if in debugger mode.  */
     bool debugger;
-#endif
 
     float_status fp_status;
 
     /* Fields from here on are preserved across CPU reset. */
     QEMUTimer *timer; /* Internal timer */
-};
 
-#define RISCV_CPU_CLASS(klass) \
-    OBJECT_CLASS_CHECK(RISCVCPUClass, (klass), TYPE_RISCV_CPU)
-#define RISCV_CPU(obj) \
-    OBJECT_CHECK(RISCVCPU, (obj), TYPE_RISCV_CPU)
-#define RISCV_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(RISCVCPUClass, (obj), TYPE_RISCV_CPU)
+    // Unicorn engine
+    struct uc_struct *uc;
+};
 
 /**
  * RISCVCPUClass:
@@ -233,8 +216,7 @@ typedef struct RISCVCPUClass {
     /*< private >*/
     CPUClass parent_class;
     /*< public >*/
-    DeviceRealize parent_realize;
-    DeviceReset parent_reset;
+    void (*parent_reset)(CPUState *cpu);
 } RISCVCPUClass;
 
 /**
@@ -272,7 +254,13 @@ typedef struct RISCVCPU {
         bool mmu;
         bool pmp;
     } cfg;
+
+    struct RISCVCPUClass cc;
 } RISCVCPU;
+
+#define RISCV_CPU(obj) ((RISCVCPU *)obj)
+#define RISCV_CPU_CLASS(klass) ((RISCVCPUClass *)klass)
+#define RISCV_CPU_GET_CLASS(obj) (&((RISCVCPU *)obj)->cc)
 
 static inline int riscv_has_ext(CPURISCVState *env, target_ulong ext)
 {
@@ -314,24 +302,18 @@ void riscv_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                      MMUAccessType access_type,
                                      int mmu_idx, MemTxAttrs attrs,
                                      MemTxResult response, uintptr_t retaddr);
-char *riscv_isa_string(RISCVCPU *cpu);
-void riscv_cpu_list(void);
 
-#define cpu_signal_handler riscv_cpu_signal_handler
-#define cpu_list riscv_cpu_list
 #define cpu_mmu_index riscv_cpu_mmu_index
 
-#ifndef CONFIG_USER_ONLY
 void riscv_cpu_swap_hypervisor_regs(CPURISCVState *env);
 int riscv_cpu_claim_interrupts(RISCVCPU *cpu, uint32_t interrupts);
 uint32_t riscv_cpu_update_mip(RISCVCPU *cpu, uint32_t mask, uint32_t value);
 #define BOOL_TO_MASK(x) (-!!(x)) /* helper for riscv_cpu_update_mip value */
 void riscv_cpu_set_rdtime_fn(CPURISCVState *env, uint64_t (*fn)(void));
-#endif
+
 void riscv_cpu_set_mode(CPURISCVState *env, target_ulong newpriv);
 
-void riscv_translate_init(void);
-int riscv_cpu_signal_handler(int host_signum, void *pinfo, void *puc);
+void riscv_translate_init(struct uc_struct *uc);
 void QEMU_NORETURN riscv_raise_exception(CPURISCVState *env,
                                          uint32_t exception, uintptr_t pc);
 
@@ -346,14 +328,10 @@ static inline void cpu_get_tb_cpu_state(CPURISCVState *env, target_ulong *pc,
 {
     *pc = env->pc;
     *cs_base = 0;
-#ifdef CONFIG_USER_ONLY
-    *flags = TB_FLAGS_MSTATUS_FS;
-#else
     *flags = cpu_mmu_index(env, 0);
     if (riscv_cpu_fp_enabled(env)) {
         *flags |= env->mstatus & MSTATUS_FS;
     }
-#endif
 }
 
 int riscv_csrrw(CPURISCVState *env, int csrno, target_ulong *ret_value,

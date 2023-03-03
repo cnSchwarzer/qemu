@@ -26,6 +26,7 @@
 #define TARGET_ARM_INTERNALS_H
 
 #include "hw/registerfields.h"
+struct uc_struct;
 
 /* register banks for CPU modes */
 #define BANK_USRSYS 0
@@ -150,6 +151,8 @@ static inline int bank_number(int mode)
         return BANK_MON;
     }
     g_assert_not_reached();
+    // never reach
+    return BANK_MON;
 }
 
 /**
@@ -169,7 +172,7 @@ static inline int r14_bank_number(int mode)
 }
 
 void arm_cpu_register_gdb_regs_for_features(ARMCPU *cpu);
-void arm_translate_init(void);
+void arm_translate_init(struct uc_struct *uc);
 
 enum arm_fprounding {
     FPROUNDING_TIEEVEN,
@@ -467,7 +470,7 @@ static inline uint32_t syn_data_abort_with_iss(int same_el,
                                                int wnr, int fsc,
                                                bool is_16bit)
 {
-    return (EC_DATAABORT << ARM_EL_EC_SHIFT) | (same_el << ARM_EL_EC_SHIFT)
+    return ( (uint32_t)EC_DATAABORT << ARM_EL_EC_SHIFT) | ( (uint32_t)same_el << ARM_EL_EC_SHIFT)
            | (is_16bit ? 0 : ARM_EL_IL)
            | ARM_EL_ISV | (sas << 22) | (sse << 21) | (srt << 16)
            | (sf << 15) | (ar << 14)
@@ -529,21 +532,10 @@ vaddr arm_adjust_watchpoint_address(CPUState *cs, vaddr addr, int len);
 /* Callback function for when a watchpoint or breakpoint triggers. */
 void arm_debug_excp_handler(CPUState *cs);
 
-#if defined(CONFIG_USER_ONLY) || !defined(CONFIG_TCG)
-static inline bool arm_is_psci_call(ARMCPU *cpu, int excp_type)
-{
-    return false;
-}
-static inline void arm_handle_psci_call(ARMCPU *cpu)
-{
-    g_assert_not_reached();
-}
-#else
 /* Return true if the r0/x0 value indicates that this SMC/HVC is a PSCI call. */
 bool arm_is_psci_call(ARMCPU *cpu, int excp_type);
 /* Actually handle a PSCI call */
 void arm_handle_psci_call(ARMCPU *cpu);
-#endif
 
 /**
  * arm_clear_exclusive: clear the exclusive monitor
@@ -613,7 +605,7 @@ struct ARMMMUFaultInfo {
  */
 static inline uint32_t arm_fi_to_sfsc(ARMMMUFaultInfo *fi)
 {
-    uint32_t fsc;
+    uint32_t fsc = 0;
 
     switch (fi->type) {
     case ARMFault_None:
@@ -681,6 +673,7 @@ static inline uint32_t arm_fi_to_sfsc(ARMMMUFaultInfo *fi)
          * short-format status code.
          */
         g_assert_not_reached();
+        break;
     }
 
     fsc |= (fi->domain << 4);
@@ -694,7 +687,7 @@ static inline uint32_t arm_fi_to_sfsc(ARMMMUFaultInfo *fi)
  */
 static inline uint32_t arm_fi_to_lfsc(ARMMMUFaultInfo *fi)
 {
-    uint32_t fsc;
+    uint32_t fsc = 0;
 
     switch (fi->type) {
     case ARMFault_None:
@@ -749,6 +742,7 @@ static inline uint32_t arm_fi_to_lfsc(ARMMMUFaultInfo *fi)
          * long-format status code.
          */
         g_assert_not_reached();
+        break;
     }
 
     fsc |= 1 << 9;
@@ -896,6 +890,8 @@ static inline bool regime_is_secure(CPUARMState *env, ARMMMUIdx mmu_idx)
         return true;
     default:
         g_assert_not_reached();
+        // never reach here
+        return true;
     }
 }
 
@@ -1032,6 +1028,8 @@ static inline bool v7m_cpacr_pass(CPUARMState *env,
         return true;
     default:
         g_assert_not_reached();
+        // never reach here
+        return true;
     }
 }
 
@@ -1094,14 +1092,7 @@ ARMMMUIdx arm_mmu_idx(CPUARMState *env);
  *
  * Return the ARMMMUIdx for the stage1 traversal for the current regime.
  */
-#ifdef CONFIG_USER_ONLY
-static inline ARMMMUIdx arm_stage1_mmu_idx(CPUARMState *env)
-{
-    return ARMMMUIdx_Stage1_E0;
-}
-#else
 ARMMMUIdx arm_stage1_mmu_idx(CPUARMState *env);
-#endif
 
 /**
  * arm_mmu_idx_is_stage1_of_2:
@@ -1199,8 +1190,6 @@ static inline int exception_target_el(CPUARMState *env)
     return target_el;
 }
 
-#ifndef CONFIG_USER_ONLY
-
 /* Security attributes for an address, as returned by v8m_security_lookup. */
 typedef struct V8M_SAttributes {
     bool subpage; /* true if these attrs don't cover the whole TARGET_PAGE */
@@ -1235,7 +1224,5 @@ bool get_phys_addr(CPUARMState *env, target_ulong address,
                    ARMMMUFaultInfo *fi, ARMCacheAttrs *cacheattrs);
 
 void arm_log_exception(int idx);
-
-#endif /* !CONFIG_USER_ONLY */
 
 #endif

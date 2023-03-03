@@ -1,8 +1,8 @@
 #ifndef INT128_H
 #define INT128_H
 
-#ifdef CONFIG_INT128
 #include "qemu/bswap.h"
+#ifdef CONFIG_INT128
 
 typedef __int128_t Int128;
 
@@ -146,6 +146,9 @@ static inline Int128 bswap128(Int128 a)
 #else /* !CONFIG_INT128 */
 
 typedef struct Int128 Int128;
+#if !(defined(_MSC_VER) && defined(__clang__))
+typedef Int128 __int128_t;
+#endif
 
 struct Int128 {
     uint64_t lo;
@@ -232,7 +235,12 @@ static inline Int128 int128_add(Int128 a, Int128 b)
 
 static inline Int128 int128_neg(Int128 a)
 {
-    uint64_t lo = -a.lo;
+#ifdef _MSC_VER
+    uint64_t lo = a.lo;
+    lo = 0 - lo;
+#else
+    uint64_t lo = (uint64_t)(-a.lo);
+#endif
     return int128_make128(lo, ~(uint64_t)a.hi + !lo);
 }
 
@@ -299,6 +307,11 @@ static inline void int128_addto(Int128 *a, Int128 b)
 static inline void int128_subfrom(Int128 *a, Int128 b)
 {
     *a = int128_sub(*a, b);
+}
+
+static inline Int128 bswap128(Int128 a)
+{
+    return int128_make128(bswap64(int128_gethi(a)), bswap64(int128_getlo(a)));
 }
 
 #endif /* CONFIG_INT128 */

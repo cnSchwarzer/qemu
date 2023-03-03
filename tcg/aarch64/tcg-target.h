@@ -13,6 +13,10 @@
 #ifndef AARCH64_TCG_TARGET_H
 #define AARCH64_TCG_TARGET_H
 
+#if defined(__APPLE__)
+#include <libkern/OSCacheControl.h>
+#endif
+
 #define TCG_TARGET_INSN_UNIT_SIZE  4
 #define TCG_TARGET_TLB_DISPLACEMENT_BITS 24
 #undef TCG_TARGET_STACK_GROWSUP
@@ -148,7 +152,15 @@ typedef enum {
 
 static inline void flush_icache_range(uintptr_t start, uintptr_t stop)
 {
+#if defined(__APPLE__)
+    /* 
+     * On Intel-based Mac computers, this function does nothing.
+     * Source: https://developer.apple.com/documentation/apple_silicon/porting_just-in-time_compilers_to_apple_silicon?language=objc
+     */
+    sys_icache_invalidate((char *)start, stop - start);
+#else
     __builtin___clear_cache((char *)start, (char *)stop);
+#endif
 }
 
 void tb_target_set_jmp_target(uintptr_t, uintptr_t, uintptr_t);

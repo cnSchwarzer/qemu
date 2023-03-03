@@ -437,7 +437,11 @@ decNumber *decNumberFromInt64(decNumber *dn, int64_t in)
 {
     uint64_t unsig = in;
     if (in < 0) {
+#ifdef _MSC_VER
+        unsig = 0 - unsig;
+#else
         unsig = -unsig;
+#endif
     }
 
     decNumberFromUInt64(dn, unsig);

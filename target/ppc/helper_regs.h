@@ -20,9 +20,7 @@
 #ifndef HELPER_REGS_H
 #define HELPER_REGS_H
 
-#include "qemu/main-loop.h"
 #include "exec/exec-all.h"
-#include "sysemu/kvm.h"
 
 /* Swap temporary saved registers with GPRs */
 static inline void hreg_swap_gpr_tgpr(CPUPPCState *env)
@@ -103,30 +101,18 @@ static inline void hreg_compute_hflags(CPUPPCState *env)
 
 static inline void cpu_interrupt_exittb(CPUState *cs)
 {
-    if (!kvm_enabled()) {
-        return;
-    }
-
-    if (!qemu_mutex_iothread_locked()) {
-        qemu_mutex_lock_iothread();
-        cpu_interrupt(cs, CPU_INTERRUPT_EXITTB);
-        qemu_mutex_unlock_iothread();
-    } else {
-        cpu_interrupt(cs, CPU_INTERRUPT_EXITTB);
-    }
+    cpu_interrupt(cs, CPU_INTERRUPT_EXITTB);
 }
 
 static inline int hreg_store_msr(CPUPPCState *env, target_ulong value,
                                  int alter_hv)
 {
     int excp;
-#if !defined(CONFIG_USER_ONLY)
     CPUState *cs = env_cpu(env);
-#endif
 
     excp = 0;
     value &= env->msr_mask;
-#if !defined(CONFIG_USER_ONLY)
+
     /* Neither mtmsr nor guest state can alter HV */
     if (!alter_hv || !(env->msr & MSR_HVB)) {
         value &= ~MSR_HVB;
@@ -162,22 +148,20 @@ static inline int hreg_store_msr(CPUPPCState *env, target_ulong value,
     if (is_book3s_arch2x(env) && ((value >> MSR_PR) & 1)) {
         value |= (1 << MSR_EE) | (1 << MSR_DR) | (1 << MSR_IR);
     }
-#endif
+
     env->msr = value;
     hreg_compute_hflags(env);
-#if !defined(CONFIG_USER_ONLY)
+
     if (unlikely(msr_pow == 1)) {
         if (!env->pending_interrupts && (*env->check_pow)(env)) {
             cs->halted = 1;
             excp = EXCP_HALTED;
         }
     }
-#endif
 
     return excp;
 }
 
-#if !defined(CONFIG_USER_ONLY)
 static inline void check_tlb_flush(CPUPPCState *env, bool global)
 {
     CPUState *cs = env_cpu(env);
@@ -196,8 +180,5 @@ static inline void check_tlb_flush(CPUPPCState *env, bool global)
         tlb_flush(cs);
     }
 }
-#else
-static inline void check_tlb_flush(CPUPPCState *env, bool global) { }
-#endif
 
 #endif /* HELPER_REGS_H */

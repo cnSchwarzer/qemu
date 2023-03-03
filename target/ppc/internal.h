@@ -29,8 +29,8 @@ static inline ret_type name(uint##size##_t start,                 \
     } else if (likely(end == max_bit)) {                          \
         ret = max_val >> start;                                   \
     } else {                                                      \
-        ret = (((uint##size##_t)(-1ULL)) >> (start)) ^            \
-            (((uint##size##_t)(-1ULL) >> (end)) >> 1);            \
+        ret = (((uint##size##_t)(0ULL - 1ULL)) >> (start)) ^      \
+            (((uint##size##_t)(0ULL - 1ULL) >> (end)) >> 1);      \
         if (unlikely(start > end)) {                              \
             return ~ret;                                          \
         }                                                         \
@@ -146,9 +146,7 @@ EXTRACT_HELPER(TO, 21, 5);
 
 EXTRACT_HELPER(CRM, 12, 8);
 
-#ifndef CONFIG_USER_ONLY
 EXTRACT_HELPER(SR, 16, 4);
-#endif
 
 /* mtfsf/mtfsfi */
 EXTRACT_HELPER(FPBF, 23, 3);

@@ -22,7 +22,6 @@
 #include "qemu/bswap.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
-#include "exec/plugin-gen.h"
 #include "tcg/tcg.h"
 
 
@@ -105,9 +104,6 @@ typedef struct DisasContextBase {
  *
  * @tb_stop:
  *      Emit any opcodes required to exit the TB, based on db->is_jmp.
- *
- * @disas_log:
- *      Print instruction disassembly to log.
  */
 typedef struct TranslatorOps {
     void (*init_disas_context)(DisasContextBase *db, CPUState *cpu);
@@ -117,7 +113,6 @@ typedef struct TranslatorOps {
                              const CPUBreakpoint *bp);
     void (*translate_insn)(DisasContextBase *db, CPUState *cpu);
     void (*tb_stop)(DisasContextBase *db, CPUState *cpu);
-    void (*disas_log)(const DisasContextBase *db, CPUState *cpu);
 } TranslatorOps;
 
 /**
@@ -158,19 +153,18 @@ void translator_loop_temp_check(DisasContextBase *db);
 
 #define GEN_TRANSLATOR_LD(fullname, type, load_fn, swap_fn)             \
     static inline type                                                  \
-    fullname ## _swap(CPUArchState *env, abi_ptr pc, bool do_swap)      \
+    fullname ## _swap(TCGContext *tcg_ctx, CPUArchState *env, abi_ptr pc, bool do_swap)      \
     {                                                                   \
         type ret = load_fn(env, pc);                                    \
         if (do_swap) {                                                  \
             ret = swap_fn(ret);                                         \
         }                                                               \
-        plugin_insn_append(&ret, sizeof(ret));                          \
         return ret;                                                     \
     }                                                                   \
                                                                         \
-    static inline type fullname(CPUArchState *env, abi_ptr pc)          \
+    static inline type fullname(TCGContext *tcg_ctx, CPUArchState *env, abi_ptr pc)          \
     {                                                                   \
-        return fullname ## _swap(env, pc, false);                       \
+        return fullname ## _swap(tcg_ctx, env, pc, false);                       \
     }
 
 GEN_TRANSLATOR_LD(translator_ldub, uint8_t, cpu_ldub_code, /* no swap */)

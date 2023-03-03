@@ -142,10 +142,13 @@ typedef struct CPUM68KState {
     uint32_t qregs[MAX_QREGS];
 
     /* Fields up to this point are cleared by a CPU reset */
-    struct {} end_reset_fields;
+    int end_reset_fields;
 
     /* Fields from here on are preserved across CPU reset. */
     uint32_t features;
+
+    // Unicorn engine
+    struct uc_struct *uc;
 } CPUM68KState;
 
 /*
@@ -161,18 +164,16 @@ struct M68kCPU {
 
     CPUNegativeOffsetState neg;
     CPUM68KState env;
+
+    struct M68kCPUClass cc;
 };
 
 
 void m68k_cpu_do_interrupt(CPUState *cpu);
 bool m68k_cpu_exec_interrupt(CPUState *cpu, int int_req);
-void m68k_cpu_dump_state(CPUState *cpu, FILE *f, int flags);
 hwaddr m68k_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
-int m68k_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
-int m68k_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 
-void m68k_tcg_init(void);
-void m68k_cpu_init_gdb(M68kCPU *cpu);
+void m68k_tcg_init(struct uc_struct *uc);
 /*
  * you can call this signal handler from your SIGBUS and SIGSEGV
  * signal handlers to inform the virtual CPU of exceptions. non zero
@@ -511,10 +512,6 @@ enum {
     ACCESS_DATA  = 0x20, /* Data load/store access        */
 };
 
-#define M68K_CPU_TYPE_SUFFIX "-" TYPE_M68K_CPU
-#define M68K_CPU_TYPE_NAME(model) model M68K_CPU_TYPE_SUFFIX
-#define CPU_RESOLVING_TYPE TYPE_M68K_CPU
-
 #define cpu_signal_handler cpu_m68k_signal_handler
 #define cpu_list m68k_cpu_list
 
@@ -561,6 +558,6 @@ static inline void cpu_get_tb_cpu_state(CPUM68KState *env, target_ulong *pc,
     }
 }
 
-void dump_mmu(CPUM68KState *env);
+// M68kCPU *cpu_m68k_init(struct uc_struct *uc, const char *cpu_model);
 
 #endif

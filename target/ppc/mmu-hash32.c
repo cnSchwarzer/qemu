@@ -22,10 +22,7 @@
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "exec/helper-proto.h"
-#include "sysemu/kvm.h"
-#include "kvm_ppc.h"
 #include "mmu-hash32.h"
-#include "exec/log.h"
 
 /* #define DEBUG_BAT */
 
@@ -351,7 +348,11 @@ static void ppc_hash32_set_r(PowerPCCPU *cpu, hwaddr pte_offset, uint32_t pte1)
     hwaddr offset = pte_offset + 6;
 
     /* The HW performs a non-atomic byte update */
-    stb_phys(CPU(cpu)->as, base + offset, ((pte1 >> 8) & 0xff) | 0x01);
+#ifdef UNICORN_ARCH_POSTFIX
+    glue(stb_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + offset, ((pte1 >> 8) & 0xff) | 0x01);
+#else
+    stb_phys(cpu->env.uc, CPU(cpu)->as, base + offset, ((pte1 >> 8) & 0xff) | 0x01);
+#endif
 }
 
 static void ppc_hash32_set_c(PowerPCCPU *cpu, hwaddr pte_offset, uint64_t pte1)
@@ -360,7 +361,11 @@ static void ppc_hash32_set_c(PowerPCCPU *cpu, hwaddr pte_offset, uint64_t pte1)
     hwaddr offset = pte_offset + 7;
 
     /* The HW performs a non-atomic byte update */
-    stb_phys(CPU(cpu)->as, base + offset, (pte1 & 0xff) | 0x80);
+#ifdef UNICORN_ARCH_POSTFIX
+    glue(stb_phys, UNICORN_ARCH_POSTFIX)(cpu->env.uc, CPU(cpu)->as, base + offset, (pte1 & 0xff) | 0x80);
+#else
+    stb_phys(cpu->env.uc, CPU(cpu)->as, base + offset, (pte1 & 0xff) | 0x80);
+#endif
 }
 
 static hwaddr ppc_hash32_htab_lookup(PowerPCCPU *cpu,
@@ -376,6 +381,7 @@ static hwaddr ppc_hash32_htab_lookup(PowerPCCPU *cpu,
     hash = vsid ^ pgidx;
     ptem = (vsid << 7) | (pgidx >> 10);
 
+#if 0
     /* Page address translation */
     qemu_log_mask(CPU_LOG_MMU, "htab_base " TARGET_FMT_plx
             " htab_mask " TARGET_FMT_plx
@@ -388,14 +394,17 @@ static hwaddr ppc_hash32_htab_lookup(PowerPCCPU *cpu,
             " hash=" TARGET_FMT_plx "\n",
             ppc_hash32_hpt_base(cpu), ppc_hash32_hpt_mask(cpu),
             vsid, ptem, hash);
+#endif
     pteg_off = get_pteg_offset32(cpu, hash);
     pte_offset = ppc_hash32_pteg_search(cpu, pteg_off, 0, ptem, pte);
     if (pte_offset == -1) {
         /* Secondary PTEG lookup */
+#if 0
         qemu_log_mask(CPU_LOG_MMU, "1 htab=" TARGET_FMT_plx "/" TARGET_FMT_plx
                 " vsid=%" PRIx32 " api=%" PRIx32
                 " hash=" TARGET_FMT_plx "\n", ppc_hash32_hpt_base(cpu),
                 ppc_hash32_hpt_mask(cpu), vsid, ptem, ~hash);
+#endif
         pteg_off = get_pteg_offset32(cpu, ~hash);
         pte_offset = ppc_hash32_pteg_search(cpu, pteg_off, 1, ptem, pte);
     }

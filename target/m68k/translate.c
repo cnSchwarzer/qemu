@@ -2774,7 +2774,11 @@ DISAS_INSN(swap)
 
 DISAS_INSN(bkpt)
 {
+#if defined(CONFIG_SOFTMMU)
+    gen_exception(s, s->base.pc_next, EXCP_ILLEGAL);
+#else
     gen_exception(s, s->base.pc_next, EXCP_DEBUG);
+#endif
 }
 
 DISAS_INSN(pea)
@@ -6389,7 +6393,7 @@ static const TranslatorOps m68k_tr_ops = {
     .disas_log          = m68k_tr_disas_log,
 };
 
-void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int max_insns,
+void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int *max_insns,
                            target_ulong pc, void *host_pc)
 {
     DisasContext dc;

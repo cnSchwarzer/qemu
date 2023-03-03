@@ -28,7 +28,6 @@
 #include "qemu/datadir.h"
 #include "qemu/guest-random.h"
 #include "qapi/error.h"
-#include "qapi/qmp/qerror.h"
 #include "qapi/qapi-visit-common.h"
 #include "qapi/clone-visitor.h"
 #include "qapi/qapi-visit-machine.h"
@@ -65,7 +64,7 @@
 /* Physical Address of PVH entry point read from kernel ELF NOTE */
 static size_t pvh_start_addr;
 
-inline void init_topo_info(X86CPUTopoInfo *topo_info,
+static void init_topo_info(X86CPUTopoInfo *topo_info,
                            const X86MachineState *x86ms)
 {
     MachineState *ms = MACHINE(x86ms);
@@ -151,17 +150,19 @@ void x86_cpus_init(X86MachineState *x86ms, int default_cpu_version)
     }
 }
 
-void x86_rtc_set_cpus_count(ISADevice *rtc, uint16_t cpus_count)
+void x86_rtc_set_cpus_count(ISADevice *s, uint16_t cpus_count)
 {
+    MC146818RtcState *rtc = MC146818_RTC(s);
+
     if (cpus_count > 0xff) {
         /*
          * If the number of CPUs can't be represented in 8 bits, the
          * BIOS must use "FW_CFG_NB_CPUS". Set RTC field to 0 just
          * to make old BIOSes fail more predictably.
          */
-        rtc_set_memory(rtc, 0x5f, 0);
+        mc146818rtc_set_cmos_data(rtc, 0x5f, 0);
     } else {
-        rtc_set_memory(rtc, 0x5f, cpus_count - 1);
+        mc146818rtc_set_cmos_data(rtc, 0x5f, cpus_count - 1);
     }
 }
 

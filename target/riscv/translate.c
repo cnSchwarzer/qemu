@@ -1100,12 +1100,12 @@ static uint64_t opcode_at(DisasContextBase *dcbase, target_ulong pc)
 
 static inline int insn_len(uint16_t first_word)
 {
-    if ((first_word & 0b11) == 0b11)
-        return 4;
-    if ((first_word & 0b111111) == 0b011111)
-        return 6;
     if ((first_word & 0b1111111) == 0b0111111)
         return 8;
+    if ((first_word & 0b111111) == 0b011111)
+        return 6;
+    if ((first_word & 0b11) == 0b11)
+        return 4;
     return 2;
 }
 

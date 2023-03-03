@@ -7,17 +7,46 @@
 # 
  
 # Fields
-%imm  32:16
-%rs2  27:5
-%rs1  22:5 
-%rd   17:5 
-%cop  6:11
+%cop  37:11
+%rs2  17:5
+%rs1  12:5
+%rd   6:5
+%sh5  20:5
+%sh6  20:6
 
-# Argument sets 
-&reito48 imm rd rs1 rs2 cop 
+# immediates:
+%imm_i    20:s12
+%imm_s    25:s7 7:5
+%imm_b    31:s1 7:1 25:6 8:4     !function=ex_shift_1
+%imm_j    31:s1 12:8 20:1 21:10  !function=ex_shift_1
+%imm_u    12:s20                 !function=ex_shift_12
+
+# Argument sets
+&reito_r  rd rs1 rs2 cop
+&reito_i  rd rs1 imm cop
+&reito_is rd rs1 shamt cop
+&reito_s  rs1 rs2 imm cop
+&reito_b  rs1 rs2 imm cop
+&reito_u  rd imm cop
+&reito_j  rd imm cop
 
 # Formats 
-@reito48     ---------------- ................ ..... ..... ..... ........... ...... %imm %rd %rs1 %rs2 %cop 
+@reito_r   ---------------- ........... ............... ..... ..... . ..... ......      &reito_r %rd %rs1 %rs2 %cop
+@reito_i   ---------------- ........... ..... ............ ... ..... . ..... ......     &reito_i %rd %rs1 imm=%imm_i %cop
+@reito_is6 ---------------- ........... ........... ...... ... ..... . ..... ......     &reito_is %rd %rs1 shamt=%sh6 %cop
+@reito_is5 ---------------- ........... ............ ..... ... ..... . ..... ......     &reito_is %rd %rs1 shamt=%sh5 %cop
+@reito_s   ---------------- ........... ..... ....... ... ..... ..... ..... . ......    &reito_s %rs1 %rs2 imm=%imm_s %cop
+@reito_b   ---------------- ........... ..... ....... ... ..... ..... ..... . ......    &reito_b %rs1 %rs2 imm=%imm_b %cop
+@reito_u   ---------------- ........... ..... .................... . ..... ......       &reito_u %rd imm=%imm_u %cop
+@reito_j   ---------------- ........... ..... .................... . ..... ......       &reito_j %rd imm=%imm_j %cop
 
 # *** Use 48-bit RV Instruction ***
-rt48         ---------------- ................ ..... ..... ..... ........... 011111 @reito48
+# Bit field 36-34 is for qemu code generation use, it can be any value.
+reito_r    ---------------- ........... 000------------ ..... ..... - ..... 011111       @reito_r
+reito_i    ---------------- ........... 001-- ............ --- ..... - ..... 011111      @reito_i
+reito_is6  ---------------- ........... 010-------- ...... --- ..... - ..... 011111      @reito_is6
+reito_is5  ---------------- ........... 011--------- ..... --- ..... - ..... 011111      @reito_is5
+reito_s    ---------------- ........... 100-- ....... --- ..... ..... ..... - 011111     @reito_s
+reito_b    ---------------- ........... 101-- ....... --- ..... ..... ..... - 011111     @reito_b
+reito_u    ---------------- ........... 110-- .................... - ..... 011111        @reito_u
+reito_j    ---------------- ........... 111-- .................... - ..... 011111        @reito_j

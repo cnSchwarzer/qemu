@@ -13,7 +13,7 @@
             <option value="$PROJECT_DIR$" />
           </set>
         </option>
-        <option name="preConfigureCommands" value="../configure --prefix=/home/reito/reito-qemu --target-list=riscv32-softmmu,riscv64-softmmu,riscv32-linux-user,riscv64-linux-user" />
+        <option name="preConfigureCommands" value="../configure --enable-debug --prefix=/home/reito/reito-qemu --target-list=riscv32-softmmu,riscv64-softmmu,riscv32-linux-user,riscv64-linux-user" />
         <option name="switches" value="-j1" />
         <option name="version" value="2" />
       </MakefileProjectSettings>

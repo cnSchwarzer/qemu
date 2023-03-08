@@ -1123,6 +1123,7 @@ static uint64_t opcode_at(DisasContextBase *dcbase, target_ulong pc)
 #include "insn_trans/trans_xreito32.c.inc"
 #include "decode-XReito48.c.inc"
 #include "insn_trans/trans_xreito48.c.inc"
+#include "reito/decode_main.c"
 
 /* The specification allows for longer insns, but not supported by qemu. */
 // Modified to 6 & 8 to support reito
@@ -1150,16 +1151,16 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
         bool (*decode_func)(DisasContext *, uint32_t);
     } decoders[] = {
         { always_true_p,  decode_insn32 },
-        { has_XReito_p,  decode_XReito32 },
         { has_xthead_p, decode_xthead },
         { has_XVentanaCondOps_p,  decode_XVentanaCodeOps },
+        { has_XReito_p,  decode_XReito32 },
     };
 
     static const struct {
         bool (*guard_func)(DisasContext *);
         bool (*decode_func)(DisasContext *, uint64_t);
     } decoders64[] = {
-        { has_XReito_p,  decode_XReito48 },
+        { has_XReito_p,  reito_decode_XReito48 },
     };
 
     ctx->virt_inst_excp = false;
@@ -1186,7 +1187,7 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
             }
         }
     } else if (len == 6) {
-        uint32_t opcode48 = opcode;
+        uint64_t opcode48 = opcode;
         opcode48 = deposit64(opcode48, 16, 32,
                              translator_ldl(env, &ctx->base,
                                              ctx->base.pc_next + 2));
@@ -1200,7 +1201,7 @@ static void decode_opc(CPURISCVState *env, DisasContext *ctx, uint16_t opcode)
             }
         }
     } else if (len == 8) {
-        uint32_t opcode64 = opcode;
+        uint64_t opcode64 = opcode;
         opcode64 = deposit64(opcode64, 16, 48,
                              translator_ldq(env, &ctx->base,
                                              ctx->base.pc_next + 2));
